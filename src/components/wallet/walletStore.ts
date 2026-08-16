@@ -26,7 +26,7 @@ export type PoolStatus =
   | "not-registered"
   | "unsupported";
 
-interface WalletState {
+export interface WalletState {
   wallet?: WalletWithStarknetFeatures;
   account?: WalletAccountV6;
   address: string;

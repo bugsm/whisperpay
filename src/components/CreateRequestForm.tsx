@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 
 import { useWallet } from "@/components/wallet/walletStore";
+import { saveToHistory } from "@/lib/request/history";
 import { EXPIRY_PRESETS, MAX_MEMO_LENGTH } from "@/lib/request/types";
 import { DEFAULT_TOKEN, isValidAddress } from "@/lib/strk20/constants";
 
@@ -56,6 +57,20 @@ export default function CreateRequestForm() {
       }
       setCreated({ id: body.id, url: body.url, path: body.path });
       setCopied(false);
+
+      // Remembered on this device only, so the dashboard can show what this
+      // browser has billed without the server ever holding that list.
+      saveToHistory({
+        id: body.id,
+        path: body.path,
+        url: body.url,
+        recipient: body.request.recipient,
+        token: body.request.token,
+        amount: body.request.amount,
+        memo: body.request.memo ?? undefined,
+        createdAt: body.request.createdAt,
+        expiresAt: body.request.expiresAt ?? undefined,
+      });
     } catch {
       setError("Could not reach the server. Check your connection and retry.");
     } finally {
