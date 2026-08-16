@@ -5,6 +5,7 @@ import {
   WalletAccountV6,
   walletV6,
   validateAndParseAddress,
+  constants as snConstants,
 } from "starknet";
 import type { WalletWithStarknetFeatures } from "@starknet-io/get-starknet-wallet-standard/features";
 
@@ -137,7 +138,7 @@ export const useWallet = create<WalletState>()((set, get) => ({
   async switchToMainnet() {
     const { account } = get();
     if (!account) return;
-    await account.switchStarknetChain(MAINNET_CHAIN_ID as never);
+    await account.switchStarknetChain(snConstants.StarknetChainId.SN_MAIN);
     const { wallet } = get();
     if (wallet) {
       set({ chainId: (await walletV6.requestChainId(wallet)) as string });
