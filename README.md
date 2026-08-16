@@ -41,7 +41,7 @@ Following [Private Sprint (STRK20)](https://strk20.starknet.io/hackathon), Aug 1
 
 ## Status
 
-🚧 Early build — working on M1.
+🚧 Early build — working on M3.
 
 ## Team
 
