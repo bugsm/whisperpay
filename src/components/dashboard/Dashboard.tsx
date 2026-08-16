@@ -44,8 +44,15 @@ export default function Dashboard() {
     }
   }, [onMainnet, balances, balancesLoading, refreshBalances]);
 
+  const balance = balances?.[normalizeAddress(DEFAULT_TOKEN.address)] ?? 0n;
+
+  // The balance half needs a connected, registered, mainnet wallet. The links
+  // half doesn't — it's local history, and gating it behind a wallet would hide
+  // a user's own invoices from them for no reason.
+  let balanceSection: React.ReactNode;
+
   if (!isConnected) {
-    return (
+    balanceSection = (
       <Panel title="Your private balance">
         <p className="mb-4 text-sm text-muted">
           Connect the wallet you receive payments with. Balances are read from
@@ -54,10 +61,8 @@ export default function Dashboard() {
         <ConnectWallet />
       </Panel>
     );
-  }
-
-  if (!onMainnet) {
-    return (
+  } else if (!onMainnet) {
+    balanceSection = (
       <Panel title="Switch to mainnet">
         <p className="mb-4 text-sm text-muted">
           The STRK20 pool this app talks to lives on Starknet mainnet.
@@ -71,10 +76,8 @@ export default function Dashboard() {
         </button>
       </Panel>
     );
-  }
-
-  if (poolStatus === "not-registered") {
-    return (
+  } else if (poolStatus === "not-registered") {
+    balanceSection = (
       <Panel title="Register with the privacy pool">
         <p className="mb-4 text-sm leading-relaxed text-muted">
           You publish a viewing key on-chain once. Until then nothing can be sent
@@ -90,10 +93,8 @@ export default function Dashboard() {
         </a>
       </Panel>
     );
-  }
-
-  if (poolStatus === "unsupported") {
-    return (
+  } else if (poolStatus === "unsupported") {
+    balanceSection = (
       <Panel title="This wallet doesn't support STRK20">
         <p className="text-sm text-muted">
           Reading a shielded balance needs the STRK20 wallet API.{" "}
@@ -109,21 +110,27 @@ export default function Dashboard() {
         </p>
       </Panel>
     );
+  } else {
+    balanceSection = (
+      <>
+        <BalanceCard
+          balance={balance}
+          loading={balancesLoading}
+          onRefresh={() => void refreshBalances()}
+        />
+        <WithdrawCard
+          account={account}
+          address={address}
+          balance={balance}
+          onDone={() => void refreshBalances()}
+        />
+      </>
+    );
   }
 
   return (
     <div className="space-y-5">
-      <BalanceCard
-        balance={balances?.[normalizeAddress(DEFAULT_TOKEN.address)] ?? 0n}
-        loading={balancesLoading}
-        onRefresh={() => void refreshBalances()}
-      />
-      <WithdrawCard
-        account={account}
-        address={address}
-        balance={balances?.[normalizeAddress(DEFAULT_TOKEN.address)] ?? 0n}
-        onDone={() => void refreshBalances()}
-      />
+      {balanceSection}
       <RequestList />
     </div>
   );
