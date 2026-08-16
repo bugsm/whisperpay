@@ -15,7 +15,7 @@ import type { RequestStatus } from "@/lib/request/types";
 import {
   DEFAULT_TOKEN,
   MAINNET_CHAIN_ID,
-  POOL_APP_URL,
+  PRIVACY_WALLETS,
   VOYAGER_TX_URL,
   normalizeAddress,
 } from "@/lib/strk20/constants";
@@ -82,15 +82,16 @@ export default function Dashboard() {
         <p className="mb-4 text-sm leading-relaxed text-muted">
           You publish a viewing key on-chain once. Until then nothing can be sent
           to you privately, so payment links pointing at this address won't work.
+          Register from your wallet's privacy section — it holds the viewing key,
+          so no dapp can do this for you.
         </p>
-        <a
-          href={POOL_APP_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-block rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-[#14101f] transition hover:brightness-110"
+        <button
+          type="button"
+          onClick={() => void refreshBalances()}
+          className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-[#14101f] transition hover:brightness-110"
         >
-          Register ↗
-        </a>
+          I've registered — recheck
+        </button>
       </Panel>
     );
   } else if (poolStatus === "unsupported") {
@@ -98,15 +99,20 @@ export default function Dashboard() {
       <Panel title="This wallet doesn't support STRK20">
         <p className="text-sm text-muted">
           Reading a shielded balance needs the STRK20 wallet API.{" "}
-          <a
-            href="https://www.ready.co/"
-            target="_blank"
-            rel="noreferrer"
-            className="text-accent underline underline-offset-4"
-          >
-            Ready
-          </a>{" "}
-          supports it today.
+          {PRIVACY_WALLETS.map((wallet, index) => (
+            <span key={wallet.name}>
+              {index > 0 ? " and " : ""}
+              <a
+                href={wallet.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-accent underline underline-offset-4"
+              >
+                {wallet.name}
+              </a>
+            </span>
+          ))}{" "}
+          support it today.
         </p>
       </Panel>
     );

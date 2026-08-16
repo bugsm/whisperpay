@@ -22,8 +22,18 @@ export const RPC_URL =
 export const VOYAGER_TX_URL = "https://voyager.online/tx/";
 export const VOYAGER_CONTRACT_URL = "https://voyager.online/contract/";
 
-/** Where a user registers their viewing key if they haven't yet. */
-export const POOL_APP_URL = "https://strk20.starknet.io/app";
+/**
+ * Wallets that implement the STRK20 privacy API.
+ *
+ * Registering a viewing key and shielding both happen *inside the wallet* —
+ * that's where the viewing key lives, and no dapp can do it on the user's
+ * behalf. So when a user isn't registered yet, the right instruction is "open
+ * your wallet", not a link to some other web app.
+ */
+export const PRIVACY_WALLETS = [
+  { name: "Ready", url: "https://www.ready.co/" },
+  { name: "Xverse", url: "https://www.xverse.app/" },
+] as const;
 
 export interface TokenInfo {
   symbol: string;

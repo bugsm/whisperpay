@@ -57,8 +57,10 @@ No configuration needed — it defaults to a public mainnet RPC. Copy
 `.env.example` to `.env.local` for your own RPC or a durable status store; every
 value there is optional.
 
-You need a Starknet wallet with STRK20 support, on **mainnet**.
-[Ready](https://www.ready.co/) supports it today.
+You need a Starknet wallet with STRK20 support, on **mainnet** —
+[Ready](https://www.ready.co/) and [Xverse](https://www.xverse.app/) support it
+today. Registering with the pool and shielding both happen **inside the wallet**:
+it holds the viewing key, so no dapp can do either on your behalf.
 
 ### How the payment is routed
 
@@ -83,10 +85,14 @@ isn't hidden, and why "submitted" and "received" are separate states.
 
 ### Getting to mainnet
 
-- [ ] Wallet with STRK20 support, on mainnet
+- [ ] [Ready](https://www.ready.co/) or [Xverse](https://www.xverse.app/), switched to mainnet
 - [ ] Some mainnet STRK — a few is enough for all three transactions
-- [ ] **Register your viewing key** once at [strk20.starknet.io/app](https://strk20.starknet.io/app);
-      nothing can be sent to you privately until you do
+- [ ] **Register with the pool from the wallet's privacy section.** One
+      transaction, done once; nothing can be sent to you privately until you do
+- [ ] **Shield some STRK in the wallet**, so the first payment runs the
+      already-funded route. (Paying with an empty shielded balance also works —
+      Whisper Pay shields and pays in one transaction — but then the deposit is
+      public, so shield ahead of time if you care about that.)
 - [ ] Use Whisper Pay end to end: create a link, pay it, withdraw — three pool transactions
 - [ ] `node scripts/strk20-json.mjs <hashes>` records them, running the same
       on-chain check the judging panel does so an ineligible hash never gets written

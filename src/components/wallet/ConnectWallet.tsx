@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from "react";
 import { createStore, type Store } from "@starknet-io/get-starknet-discovery";
 import type { WalletWithStarknetFeatures } from "@starknet-io/get-starknet-wallet-standard/features";
 
+import { PRIVACY_WALLETS } from "@/lib/strk20/constants";
 import { useWallet } from "./walletStore";
 
 /**
@@ -124,15 +125,20 @@ export default function ConnectWallet({
           <p className="text-sm leading-relaxed text-muted">
             No Starknet wallet detected. Whisper Pay needs one with STRK20
             support —{" "}
-            <a
-              href="https://www.ready.co/"
-              target="_blank"
-              rel="noreferrer"
-              className="text-accent underline underline-offset-4"
-            >
-              Ready
-            </a>{" "}
-            supports it today.
+            {PRIVACY_WALLETS.map((wallet, index) => (
+              <span key={wallet.name}>
+                {index > 0 ? " and " : ""}
+                <a
+                  href={wallet.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-accent underline underline-offset-4"
+                >
+                  {wallet.name}
+                </a>
+              </span>
+            ))}{" "}
+            support it today.
           </p>
         )}
 

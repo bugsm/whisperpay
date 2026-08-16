@@ -11,7 +11,7 @@ import {
   findToken,
   normalizeAddress,
   MAINNET_CHAIN_ID,
-  POOL_APP_URL,
+  PRIVACY_WALLETS,
   VOYAGER_TX_URL,
 } from "@/lib/strk20/constants";
 import { describeStrk20Error, type Strk20Failure } from "@/lib/strk20/errors";
@@ -230,40 +230,23 @@ export default function PayClient({
           ) : poolStatus === "unsupported" ? (
             <Notice tone="warn" title="This wallet doesn't support STRK20">
               Whisper Pay needs the STRK20 privacy API to shield and transfer.{" "}
-              <a
-                href="https://www.ready.co/"
-                target="_blank"
-                rel="noreferrer"
-                className="text-accent underline underline-offset-4"
-              >
-                Ready
-              </a>{" "}
-              supports it today.
+              <WalletLinks /> support it today.
             </Notice>
           ) : poolStatus === "not-registered" ? (
             <>
               <Notice tone="warn" title="Register with the privacy pool first">
                 Every pool user publishes a viewing key once, on-chain, before
-                they can send or receive private payments. It takes one
-                transaction.
+                they can send or receive private payments. Your wallet does this
+                itself — open its privacy section and register, then come back.
+                It takes one transaction.
               </Notice>
-              <div className="mt-4 flex flex-wrap gap-3">
-                <a
-                  href={POOL_APP_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-[#14101f] transition hover:brightness-110"
-                >
-                  Register ↗
-                </a>
-                <button
-                  type="button"
-                  onClick={() => void refreshBalances()}
-                  className="rounded-xl border border-hairline px-4 py-2.5 text-sm transition hover:bg-surface-raised"
-                >
-                  I've registered — recheck
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => void refreshBalances()}
+                className="mt-4 w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-[#14101f] transition hover:brightness-110"
+              >
+                I've registered — recheck
+              </button>
             </>
           ) : balances === undefined ? (
             <p className="text-sm text-muted">Reading your shielded balance…</p>
@@ -470,6 +453,27 @@ function FailureCard({
         Try again
       </button>
     </div>
+  );
+}
+
+/** "Ready and Xverse", each linked — the wallets that implement STRK20. */
+function WalletLinks() {
+  return (
+    <>
+      {PRIVACY_WALLETS.map((wallet, index) => (
+        <span key={wallet.name}>
+          {index > 0 ? " and " : ""}
+          <a
+            href={wallet.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent underline underline-offset-4"
+          >
+            {wallet.name}
+          </a>
+        </span>
+      ))}
+    </>
   );
 }
 
