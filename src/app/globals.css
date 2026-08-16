@@ -1,26 +1,52 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * Whisper Pay is a single, deliberately dark surface. A payment page is a
+ * moment of trust — the visual language stays quiet, high-contrast and free of
+ * decoration that could be mistaken for a status signal.
+ */
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-hairline: var(--hairline);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  --background: #08080c;
+  --foreground: #ededf2;
+  --surface: rgba(255, 255, 255, 0.03);
+  --surface-raised: rgba(255, 255, 255, 0.06);
+  --hairline: rgba(255, 255, 255, 0.09);
+  --muted: #8b8b9a;
+  --accent: #a78bfa;
+  --accent-soft: rgba(167, 139, 250, 0.14);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A single soft light source behind the page, so cards read as raised. */
+.ambient {
+  background-image: radial-gradient(
+    60rem 40rem at 50% -10%,
+    rgba(167, 139, 250, 0.10),
+    transparent 70%
+  );
+}
+
+/* Numbers in tables and receipts must not shift width as they change. */
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
