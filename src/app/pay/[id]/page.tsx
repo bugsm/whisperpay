@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import PayClient, { type PayRequestDto } from "@/components/pay/PayClient";
+import { verifyNameStillResolves, type NameCheck } from "@/lib/identity/starknetid";
 import { decodeRequest, RequestDecodeError } from "@/lib/request/codec";
 
 /**
@@ -22,11 +23,13 @@ export default async function PayPage({ params }: PageProps<"/pay/[id]">) {
   const { id } = await params;
 
   let dto: PayRequestDto;
+  let nameCheck: NameCheck | null = null;
   try {
     const request = decodeRequest(id);
     dto = {
       id: request.id,
       recipient: request.recipient,
+      recipientName: request.recipientName,
       token: request.token,
       // bigint doesn't survive the server→client boundary; the client parses it back.
       amount: request.amount.toString(),
@@ -34,6 +37,15 @@ export default async function PayPage({ params }: PageProps<"/pay/[id]">) {
       createdAt: request.createdAt,
       expiresAt: request.expiresAt,
     };
+
+    // Confirm the label still points where it did when the link was made. Done
+    // here rather than in the browser so the payer doesn't need their own RPC.
+    if (request.recipientName) {
+      nameCheck = await verifyNameStillResolves(
+        request.recipientName,
+        request.recipient
+      );
+    }
   } catch (error) {
     return (
       <section className="rounded-2xl border border-hairline bg-surface p-6">
@@ -55,5 +67,5 @@ export default async function PayPage({ params }: PageProps<"/pay/[id]">) {
     );
   }
 
-  return <PayClient request={dto} />;
+  return <PayClient request={dto} nameCheck={nameCheck} />;
 }

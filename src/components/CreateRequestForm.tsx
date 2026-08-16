@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { useWallet } from "@/components/wallet/walletStore";
+import { isStarkDomain } from "@/lib/identity/encoding";
 import { saveToHistory } from "@/lib/request/history";
 import { EXPIRY_PRESETS, MAX_MEMO_LENGTH } from "@/lib/request/types";
 import { DEFAULT_TOKEN, isValidAddress } from "@/lib/strk20/constants";
@@ -13,6 +14,13 @@ interface CreatedLink {
   url: string;
   path: string;
 }
+
+/** What we know about whatever the user typed into "Paid to". */
+type Resolution =
+  | { state: "idle" }
+  | { state: "loading" }
+  | { state: "ok"; address: string; name: string | null }
+  | { state: "error"; message: string };
 
 export default function CreateRequestForm() {
   const { address, isConnected } = useWallet();
@@ -26,14 +34,73 @@ export default function CreateRequestForm() {
   const [created, setCreated] = useState<CreatedLink | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const recipientValid = recipient === "" || isValidAddress(recipient);
+  // Only the *answer* is state. Everything transient — empty, malformed,
+  // still-in-flight — is derived from what's currently typed, so there's no
+  // synchronous setState on every keystroke and no chance of the hint
+  // disagreeing with the input it describes.
+  const [lookup, setLookup] = useState<{ for: string; result: Resolution } | null>(
+    null
+  );
+
+  const looksValid =
+    isValidAddress(recipient) || isStarkDomain(recipient.toLowerCase());
+  const recipientValid = recipient === "" || looksValid;
+
+  const resolution: Resolution =
+    recipient === ""
+      ? { state: "idle" }
+      : !looksValid
+        ? { state: "error", message: "Enter a Starknet address or a .stark name." }
+        : lookup?.for === recipient
+          ? lookup.result
+          : { state: "loading" };
+
+  // Resolve what was typed, debounced. Works both ways: a .stark name shows the
+  // address it points at, and an address shows the name that points back at it.
+  useEffect(() => {
+    if (recipient === "" || !looksValid) return;
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/resolve?identifier=${encodeURIComponent(recipient)}`,
+          { signal: controller.signal }
+        );
+        const body = await response.json();
+        setLookup({
+          for: recipient,
+          result: response.ok
+            ? { state: "ok", address: body.address, name: body.name ?? null }
+            : { state: "error", message: body.error ?? "Lookup failed." },
+        });
+      } catch (error) {
+        // An aborted request is a superseded keystroke, not a failure.
+        if ((error as Error)?.name !== "AbortError") {
+          setLookup({
+            for: recipient,
+            result: { state: "error", message: "Couldn't reach the resolver." },
+          });
+        }
+      }
+    }, 400);
+
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [recipient, looksValid]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
 
-    if (!isValidAddress(recipient)) {
-      setError("Enter the Starknet address that should receive the payment.");
+    if (!looksValid) {
+      setError("Enter the Starknet address or .stark name that should be paid.");
+      return;
+    }
+    if (resolution.state === "error") {
+      setError(resolution.message);
       return;
     }
 
@@ -65,6 +132,7 @@ export default function CreateRequestForm() {
         path: body.path,
         url: body.url,
         recipient: body.request.recipient,
+        recipientName: body.request.recipientName ?? undefined,
         token: body.request.token,
         amount: body.request.amount,
         memo: body.request.memo ?? undefined,
@@ -153,13 +221,13 @@ export default function CreateRequestForm() {
       <div className="mt-6 space-y-5">
         <Field
           label="Paid to"
-          hint="The Starknet address that receives the payment, registered with the privacy pool."
+          hint="A Starknet address or a .stark name, registered with the privacy pool."
         >
           <div className="flex gap-2">
             <input
               value={recipient}
               onChange={(event) => setRecipient(event.target.value.trim())}
-              placeholder="0x…"
+              placeholder="alice.stark or 0x…"
               spellCheck={false}
               className={`min-w-0 flex-1 rounded-xl border bg-background px-3 py-2.5 font-mono text-xs outline-none transition focus:border-accent ${
                 recipientValid ? "border-hairline" : "border-red-500/60"
@@ -175,11 +243,7 @@ export default function CreateRequestForm() {
               </button>
             ) : null}
           </div>
-          {!recipientValid ? (
-            <p className="mt-1.5 text-xs text-red-400">
-              That doesn't look like a Starknet address.
-            </p>
-          ) : null}
+          <ResolutionHint resolution={resolution} typed={recipient} />
         </Field>
 
         <Field label="Amount">
@@ -238,6 +302,41 @@ export default function CreateRequestForm() {
         {submitting ? "Creating…" : "Create payment link"}
       </button>
     </form>
+  );
+}
+
+/**
+ * Feedback under the "Paid to" field. A name shows the address it resolves to
+ * so the requester can confirm it before sharing; an address shows any name
+ * pointing at it, which catches a pasted-the-wrong-thing mistake.
+ */
+function ResolutionHint({
+  resolution,
+  typed,
+}: {
+  resolution: Resolution;
+  typed: string;
+}) {
+  if (resolution.state === "idle") return null;
+
+  if (resolution.state === "loading") {
+    return <p className="mt-1.5 text-xs text-muted">Looking up…</p>;
+  }
+
+  if (resolution.state === "error") {
+    return <p className="mt-1.5 text-xs text-red-400">{resolution.message}</p>;
+  }
+
+  const typedAName = typed.toLowerCase().endsWith(".stark");
+
+  return (
+    <p className="mt-1.5 font-mono text-xs break-all text-emerald-300/90">
+      {typedAName
+        ? `→ ${resolution.address}`
+        : resolution.name
+          ? `→ ${resolution.name}`
+          : null}
+    </p>
   );
 }
 

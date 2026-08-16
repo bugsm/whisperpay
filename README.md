@@ -22,6 +22,7 @@ On a public chain, every payment link normally leaks the full picture: who paid,
 - **Frontend & Backend:** Next.js
 - **Chain interaction:** Starknet.js
 - **Privacy layer:** STRK20 wallet API / SDK for the shielding flow
+- **Identity:** Starknet ID, so a request can be addressed to `alice.stark`
 
 ## Goal for the sprint
 
@@ -33,15 +34,62 @@ Ship a minimal but fully working mainnet flow:
 
 Following [Private Sprint (STRK20)](https://strk20.starknet.io/hackathon), Aug 14–31.
 
-* **M1:** payment request object + shareable link + shield-to-pay flow
-* **M2:** paid-detection + private balance dashboard (viewing key)
-* **M3:** unshield ("withdraw to spend") + pay-by-identifier lookup
+* ✅ **M1:** payment request object + shareable link + shield-to-pay flow
+* ✅ **M2:** paid-detection + private balance dashboard (viewing key)
+* ✅ **M3:** unshield ("withdraw to spend") + pay-by-identifier lookup (Starknet ID)
 * **M4:** recurring payment requests (subscriptions / repeat invoices)
 * **M5:** stretch — public status page per link (paid / pending) without revealing amount or parties
 
 ## Status
 
-🚧 Early build — working on M3.
+M1–M3 are built and running against mainnet infrastructure. Still to do: the
+three real pool transactions for `strk20.json`, a demo video, and a public
+deployment — see [Getting to mainnet](#getting-to-mainnet).
+
+## Run it
+
+```bash
+npm install
+npm run dev          # http://localhost:3000
+```
+
+No configuration needed — it defaults to a public mainnet RPC. Copy
+`.env.example` to `.env.local` for your own RPC or a durable status store; every
+value there is optional.
+
+You need a Starknet wallet with STRK20 support, on **mainnet**.
+[Ready](https://www.ready.co/) supports it today.
+
+### How the payment is routed
+
+Before showing a Pay button, the app reads the payer's shielded balance and
+picks a route ([`src/lib/strk20/plan.ts`](src/lib/strk20/plan.ts)):
+
+| Payer's state | Actions submitted | What's public |
+| --- | --- | --- |
+| Funded in the pool | `[transfer]` | nothing |
+| Not funded | `[deposit, transfer]` — one atomic tx | the deposit only |
+
+The second route is what lets someone pay a link having never used the pool.
+Both actions go to the wallet as a single `strk20InvokeTransaction`, so they
+settle together or not at all.
+
+When the deposit would exactly equal the payment — the zero-balance case — the
+amount is effectively published and linked to the transfer by timing. The app
+detects this and offers to round the deposit up; the surplus stays shielded.
+
+[**docs/PRIVACY.md**](docs/PRIVACY.md) has the full accounting of what is and
+isn't hidden, and why "submitted" and "received" are separate states.
+
+### Getting to mainnet
+
+- [ ] Wallet with STRK20 support, on mainnet
+- [ ] Some mainnet STRK — a few is enough for all three transactions
+- [ ] **Register your viewing key** once at [strk20.starknet.io/app](https://strk20.starknet.io/app);
+      nothing can be sent to you privately until you do
+- [ ] Use Whisper Pay end to end: create a link, pay it, withdraw — three pool transactions
+- [ ] `node scripts/strk20-json.mjs <hashes>` records them, running the same
+      on-chain check the judging panel does so an ineligible hash never gets written
 
 ## Team
 

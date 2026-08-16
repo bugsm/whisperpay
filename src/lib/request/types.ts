@@ -13,8 +13,19 @@
 export interface PaymentRequest {
   /** Random, unique per request. Also the key for the optional status store. */
   id: string;
-  /** Who gets paid. A Starknet address registered with the privacy pool. */
+  /**
+   * Who gets paid. A Starknet address registered with the privacy pool.
+   *
+   * Always authoritative, even when `recipientName` is present: names can be
+   * sold and re-pointed, addresses can't.
+   */
   recipient: string;
+  /**
+   * Display label the request was created against (`alice.stark`), resolved to
+   * `recipient` at creation time. Purely cosmetic — the payer page re-checks it
+   * still points at `recipient` and says so if it doesn't.
+   */
+  recipientName?: string;
   /** Token contract address. */
   token: string;
   /** Amount owed, in the token's smallest unit. */

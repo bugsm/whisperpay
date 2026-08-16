@@ -20,6 +20,8 @@ export interface HistoryEntry {
   path: string;
   url: string;
   recipient: string;
+  /** `.stark` label the request was created against, when there was one. */
+  recipientName?: string;
   token: string;
   /** Smallest-unit amount, as a decimal string. */
   amount: string;

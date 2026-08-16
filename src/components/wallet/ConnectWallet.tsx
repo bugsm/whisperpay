@@ -1,10 +1,43 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { createStore, type Store } from "@starknet-io/get-starknet-discovery";
 import type { WalletWithStarknetFeatures } from "@starknet-io/get-starknet-wallet-standard/features";
 
 import { useWallet } from "./walletStore";
+
+/**
+ * Wallet discovery is a genuine external store: wallets register themselves
+ * asynchronously after page load, and the set is global rather than per
+ * component. Reading it through `useSyncExternalStore` keeps the snapshot
+ * reference stable between changes — a `useEffect` + `useState` pair would
+ * re-slice the array on every notification and re-render regardless.
+ */
+const EMPTY: readonly WalletWithStarknetFeatures[] = [];
+
+let discoveryStore: Store | undefined;
+let snapshot: readonly WalletWithStarknetFeatures[] = EMPTY;
+
+function subscribeToWallets(onStoreChange: () => void): () => void {
+  // Created on first subscribe — which React runs in an effect, so this never
+  // happens during render — and kept for the lifetime of the page.
+  discoveryStore ??= createStore({ eip1193Adapters: [] });
+  snapshot = discoveryStore.getWallets().slice();
+  onStoreChange();
+
+  return discoveryStore.subscribe((next) => {
+    snapshot = next.slice();
+    onStoreChange();
+  });
+}
+
+function getWalletsSnapshot(): readonly WalletWithStarknetFeatures[] {
+  return snapshot;
+}
+
+function getServerSnapshot(): readonly WalletWithStarknetFeatures[] {
+  return EMPTY;
+}
 
 /**
  * Wallet discovery and connection.
@@ -22,17 +55,14 @@ export default function ConnectWallet({
 }) {
   const { isConnected, isConnecting, address, connect, disconnect } = useWallet();
 
-  const [wallets, setWallets] = useState<WalletWithStarknetFeatures[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [error, setError] = useState("");
 
-  // Created once on mount so wallets have time to register themselves before
-  // the user opens the picker.
-  useEffect(() => {
-    const store: Store = createStore({ eip1193Adapters: [] });
-    setWallets(store.getWallets().slice());
-    return store.subscribe((next) => setWallets(next.slice()));
-  }, []);
+  const wallets = useSyncExternalStore(
+    subscribeToWallets,
+    getWalletsSnapshot,
+    getServerSnapshot
+  );
 
   const pickable = wallets.filter(
     (w) => !w.name.toLowerCase().replace(/[^a-z]/g, "").includes("metamask")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import ConnectWallet from "@/components/wallet/ConnectWallet";
@@ -314,29 +314,42 @@ function RequestList() {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [statuses, setStatuses] = useState<Record<string, RequestStatus>>({});
 
+  // History lives in localStorage, which only exists after mount — reading it
+  // during render would differ between server and client.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEntries(loadHistory());
   }, []);
 
-  const refreshStatuses = useCallback(async (list: HistoryEntry[]) => {
-    const results = await Promise.all(
-      list.map(async (entry) => {
-        try {
-          const response = await fetch(`/api/status/${entry.id}`);
-          if (!response.ok) return [entry.id, "pending" as RequestStatus] as const;
-          const body = await response.json();
-          return [entry.id, body.record.status as RequestStatus] as const;
-        } catch {
-          return [entry.id, "pending" as RequestStatus] as const;
-        }
-      })
-    );
-    setStatuses(Object.fromEntries(results));
-  }, []);
-
   useEffect(() => {
-    if (entries.length > 0) void refreshStatuses(entries);
-  }, [entries, refreshStatuses]);
+    if (entries.length === 0) return;
+
+    // Guarded so a slow response for an earlier entry list can't overwrite the
+    // statuses of a newer one.
+    let cancelled = false;
+
+    void (async () => {
+      const results = await Promise.all(
+        entries.map(async (entry) => {
+          try {
+            const response = await fetch(`/api/status/${entry.id}`);
+            if (!response.ok) {
+              return [entry.id, "pending" as RequestStatus] as const;
+            }
+            const body = await response.json();
+            return [entry.id, body.record.status as RequestStatus] as const;
+          } catch {
+            return [entry.id, "pending" as RequestStatus] as const;
+          }
+        })
+      );
+      if (!cancelled) setStatuses(Object.fromEntries(results));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [entries]);
 
   async function confirm(id: string) {
     try {
@@ -388,6 +401,7 @@ function RequestList() {
                   ) : null}
                 </p>
                 <p className="mt-0.5 text-xs text-muted">
+                  {entry.recipientName ? `${entry.recipientName} · ` : ""}
                   {new Date(entry.createdAt * 1000).toLocaleDateString()}
                 </p>
               </div>

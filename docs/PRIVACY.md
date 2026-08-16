@@ -95,6 +95,28 @@ Whoever hosts the app does see standard web traffic: the fact that an IP opened 
 particular payment link, and — because the request is in the URL path — the
 contents of that link. Self-host if that matters to you.
 
+## Names are labels, addresses are what get paid
+
+A request can be addressed to `alice.stark` instead of a hex string. The name is
+resolved **once, when the link is created**, and the resolved address is what
+goes into the link and what the wallet is asked to pay. The name rides along
+only as a display label.
+
+This ordering is deliberate. Names are transferable: if the link stored the name
+and resolved it at payment time, selling or re-pointing the name would silently
+redirect every link ever shared with it. Resolving at creation time means an old
+link keeps paying the party it was created for.
+
+The payer page still re-resolves the label and compares it to the address in the
+link. If they've diverged, it says so, shows where the name points now, and
+stops presenting the name as the recipient — the payer can then check with
+whoever sent the link. A network failure during that check reports "unchecked"
+rather than a false alarm.
+
+Resolution runs against the Starknet ID naming contract through the app's own
+RPC. The public HTTP resolver would work too, but it would tell a third party
+which names are being looked up.
+
 ## Why "submitted" and "confirmed" are different states
 
 When a payer completes a payment, their browser reports the transaction hash.

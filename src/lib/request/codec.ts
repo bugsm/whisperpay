@@ -11,6 +11,7 @@
  * validates every field and refuses anything it doesn't fully understand.
  */
 
+import { isStarkDomain } from "@/lib/identity/encoding";
 import { isValidAddress, findToken, normalizeAddress } from "@/lib/strk20/constants";
 import { MAX_MEMO_LENGTH, type PaymentRequest } from "./types";
 
@@ -27,6 +28,8 @@ interface WireV1 {
   m?: string;
   c: number;
   e?: number;
+  /** Optional `.stark` display label. Added after v1 shipped; older links omit it. */
+  n?: string;
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {
@@ -70,6 +73,7 @@ export function encodeRequest(request: PaymentRequest): string {
   };
   if (request.memo) wire.m = request.memo;
   if (request.expiresAt !== undefined) wire.e = request.expiresAt;
+  if (request.recipientName) wire.n = request.recipientName;
 
   return bytesToBase64Url(new TextEncoder().encode(JSON.stringify(wire)));
 }
@@ -139,9 +143,18 @@ export function decodeRequest(encoded: string): PaymentRequest {
     }
   }
 
+  // A malformed label would be shown next to a real address, so hold it to the
+  // same standard as everything else rather than rendering whatever arrives.
+  if (wire.n !== undefined) {
+    if (typeof wire.n !== "string" || !isStarkDomain(wire.n.toLowerCase())) {
+      throw new RequestDecodeError("Link carries an invalid recipient name.");
+    }
+  }
+
   return {
     id: wire.i,
     recipient: normalizeAddress(wire.r),
+    recipientName: wire.n?.toLowerCase(),
     token: normalizeAddress(wire.t),
     amount,
     memo: wire.m,

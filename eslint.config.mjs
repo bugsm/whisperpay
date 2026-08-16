@@ -13,6 +13,15 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // Much of this UI is explanatory prose about what is and isn't private,
+      // and it reads better with real apostrophes than with &apos; scattered
+      // through it. JSX text is escaped by React either way, so this is a
+      // typographic preference rather than a correctness rule.
+      "react/no-unescaped-entities": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

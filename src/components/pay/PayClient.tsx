@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import ConnectWallet from "@/components/wallet/ConnectWallet";
 import { useWallet } from "@/components/wallet/walletStore";
 import { formatDisplay } from "@/lib/amount";
+import type { NameCheck } from "@/lib/identity/starknetid";
 import { isExpired } from "@/lib/request/types";
 import {
   findToken,
@@ -21,6 +22,7 @@ import { mainnetProvider } from "@/lib/strk20/provider";
 export interface PayRequestDto {
   id: string;
   recipient: string;
+  recipientName?: string;
   token: string;
   amount: string;
   memo?: string;
@@ -35,7 +37,13 @@ type Phase =
   | { name: "paid"; txHash: string }
   | { name: "failed"; failure: Strk20Failure };
 
-export default function PayClient({ request }: { request: PayRequestDto }) {
+export default function PayClient({
+  request,
+  nameCheck,
+}: {
+  request: PayRequestDto;
+  nameCheck?: NameCheck | null;
+}) {
   const {
     account,
     address,
@@ -56,8 +64,11 @@ export default function PayClient({ request }: { request: PayRequestDto }) {
   const amount = BigInt(request.amount);
   const onMainnet = isConnected && chainId === MAINNET_CHAIN_ID;
 
-  // Evaluated on the client so a cached render can't show a stale verdict.
+  // Evaluated after mount rather than during render: `isExpired` reads the
+  // clock, and letting the server and the client disagree about the time would
+  // be a hydration mismatch.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setExpired(isExpired(request));
   }, [request]);
 
@@ -149,7 +160,16 @@ export default function PayClient({ request }: { request: PayRequestDto }) {
 
         <dl className="mt-5 space-y-2 border-t border-hairline pt-4 text-sm">
           <Row label="To">
-            <span className="font-mono text-xs break-all">{request.recipient}</span>
+            {request.recipientName && nameCheck?.state === "match" ? (
+              <span className="flex flex-col items-end gap-0.5">
+                <span className="font-medium">{request.recipientName}</span>
+                <span className="font-mono text-[11px] break-all text-muted">
+                  {request.recipient}
+                </span>
+              </span>
+            ) : (
+              <span className="font-mono text-xs break-all">{request.recipient}</span>
+            )}
           </Row>
           <Row label="Network">Starknet mainnet</Row>
           {request.expiresAt ? (
@@ -159,6 +179,21 @@ export default function PayClient({ request }: { request: PayRequestDto }) {
           ) : null}
         </dl>
       </Card>
+
+      {nameCheck?.state === "moved" ? (
+        <Notice tone="warn" title={`${nameCheck.name} no longer points here`}>
+          When this link was created, {nameCheck.name} resolved to the address
+          above. It now resolves to{" "}
+          {nameCheck.actual ? (
+            <span className="font-mono">{nameCheck.actual}</span>
+          ) : (
+            "nothing"
+          )}
+          . Names can be sold or re-pointed, so Whisper Pay pays the address the
+          link was made with — never the name's current owner. Check with whoever
+          sent you this link before paying.
+        </Notice>
+      ) : null}
 
       {expired ? (
         <Notice tone="warn" title="This link has expired">

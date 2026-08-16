@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 
 import { AmountError, parseUnits } from "@/lib/amount";
+import { isStarkDomain, resolveStarkName } from "@/lib/identity/starknetid";
 import { encodeRequest, newRequestId } from "@/lib/request/codec";
 import { MAX_MEMO_LENGTH, type PaymentRequest } from "@/lib/request/types";
 import {
@@ -34,9 +35,29 @@ export async function POST(request: NextRequest) {
   }
   const input = body as Record<string, unknown>;
 
-  // Recipient
-  if (typeof input.recipient !== "string" || !isValidAddress(input.recipient)) {
-    return fail("`recipient` must be a valid Starknet address.");
+  // Recipient — a raw address, or a .stark name resolved here and now.
+  //
+  // The resolved address is what gets stored and paid; the name rides along only
+  // as a label. Resolving at creation time means a later transfer of the name
+  // can't silently redirect an already-shared link.
+  if (typeof input.recipient !== "string" || input.recipient.trim() === "") {
+    return fail("`recipient` is required.");
+  }
+  const identifier = input.recipient.trim();
+  let recipientAddress: string;
+  let recipientName: string | undefined;
+
+  if (isStarkDomain(identifier.toLowerCase())) {
+    recipientName = identifier.toLowerCase();
+    const resolved = await resolveStarkName(recipientName);
+    if (!resolved) {
+      return fail(`${recipientName} isn't registered, or points nowhere.`);
+    }
+    recipientAddress = resolved;
+  } else if (isValidAddress(identifier)) {
+    recipientAddress = normalizeAddress(identifier);
+  } else {
+    return fail("`recipient` must be a Starknet address or a .stark name.");
   }
 
   // Token — defaults to STRK.
@@ -88,7 +109,8 @@ export async function POST(request: NextRequest) {
 
   const paymentRequest: PaymentRequest = {
     id: newRequestId(),
-    recipient: normalizeAddress(input.recipient),
+    recipient: recipientAddress,
+    recipientName,
     token: normalizeAddress(token.address),
     amount,
     memo,
@@ -106,6 +128,7 @@ export async function POST(request: NextRequest) {
       url: absoluteUrl(request, path),
       request: {
         recipient: paymentRequest.recipient,
+        recipientName: paymentRequest.recipientName ?? null,
         token: paymentRequest.token,
         tokenSymbol: token.symbol,
         amount: paymentRequest.amount.toString(),
