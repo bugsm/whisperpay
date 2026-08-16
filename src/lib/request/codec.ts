@@ -1,0 +1,151 @@
+/**
+ * Encoding a payment request into a link, and back.
+ *
+ * The wire format is a compact JSON object, base64url-encoded, sitting in the
+ * URL path. It is *not* signed: anyone can mint a link, which is the point —
+ * there's no account system. Tampering with someone else's link only produces a
+ * different request, and the payer sees the recipient and amount before they
+ * approve anything in their wallet.
+ *
+ * Because the payload is entirely attacker-controlled, `decodeRequest`
+ * validates every field and refuses anything it doesn't fully understand.
+ */
+
+import { isValidAddress, findToken, normalizeAddress } from "@/lib/strk20/constants";
+import { MAX_MEMO_LENGTH, type PaymentRequest } from "./types";
+
+export class RequestDecodeError extends Error {}
+
+/** Compact wire shape. Short keys keep links short. */
+interface WireV1 {
+  v: 1;
+  i: string;
+  r: string;
+  t: string;
+  /** Decimal string, smallest unit — JSON has no bigint. */
+  a: string;
+  m?: string;
+  c: number;
+  e?: number;
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlToBytes(value: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new RequestDecodeError("Link contains characters that aren't valid.");
+  }
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+  let binary: string;
+  try {
+    binary = atob(padded);
+  } catch {
+    throw new RequestDecodeError("Link isn't valid base64.");
+  }
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** 12-character URL-safe id, ~72 bits of randomness. */
+export function newRequestId(): string {
+  const bytes = new Uint8Array(9);
+  crypto.getRandomValues(bytes);
+  return bytesToBase64Url(bytes);
+}
+
+export function encodeRequest(request: PaymentRequest): string {
+  const wire: WireV1 = {
+    v: 1,
+    i: request.id,
+    r: request.recipient,
+    t: request.token,
+    a: request.amount.toString(),
+    c: request.createdAt,
+  };
+  if (request.memo) wire.m = request.memo;
+  if (request.expiresAt !== undefined) wire.e = request.expiresAt;
+
+  return bytesToBase64Url(new TextEncoder().encode(JSON.stringify(wire)));
+}
+
+export function decodeRequest(encoded: string): PaymentRequest {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(base64UrlToBytes(encoded)));
+  } catch (error) {
+    if (error instanceof RequestDecodeError) throw error;
+    throw new RequestDecodeError("Link payload isn't readable.");
+  }
+
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new RequestDecodeError("Link payload isn't an object.");
+  }
+  const wire = parsed as Partial<WireV1>;
+
+  if (wire.v !== 1) {
+    throw new RequestDecodeError(
+      "This link was made by a newer version of Whisper Pay."
+    );
+  }
+
+  if (typeof wire.i !== "string" || !/^[A-Za-z0-9_-]{1,32}$/.test(wire.i)) {
+    throw new RequestDecodeError("Link is missing a valid request id.");
+  }
+
+  if (typeof wire.r !== "string" || !isValidAddress(wire.r)) {
+    throw new RequestDecodeError("Link doesn't carry a valid recipient address.");
+  }
+
+  if (typeof wire.t !== "string" || !isValidAddress(wire.t)) {
+    throw new RequestDecodeError("Link doesn't carry a valid token address.");
+  }
+  if (!findToken(wire.t)) {
+    throw new RequestDecodeError(
+      "This link asks for a token Whisper Pay doesn't support."
+    );
+  }
+
+  if (typeof wire.a !== "string" || !/^\d+$/.test(wire.a)) {
+    throw new RequestDecodeError("Link doesn't carry a valid amount.");
+  }
+  const amount = BigInt(wire.a);
+  if (amount <= 0n) {
+    throw new RequestDecodeError("Payment amount must be greater than zero.");
+  }
+
+  if (typeof wire.c !== "number" || !Number.isFinite(wire.c) || wire.c <= 0) {
+    throw new RequestDecodeError("Link doesn't carry a valid creation time.");
+  }
+
+  if (
+    wire.e !== undefined &&
+    (typeof wire.e !== "number" || !Number.isFinite(wire.e) || wire.e <= 0)
+  ) {
+    throw new RequestDecodeError("Link carries an invalid expiry.");
+  }
+
+  if (wire.m !== undefined) {
+    if (typeof wire.m !== "string") {
+      throw new RequestDecodeError("Link carries an invalid memo.");
+    }
+    if (wire.m.length > MAX_MEMO_LENGTH) {
+      throw new RequestDecodeError("Link's memo is too long.");
+    }
+  }
+
+  return {
+    id: wire.i,
+    recipient: normalizeAddress(wire.r),
+    token: normalizeAddress(wire.t),
+    amount,
+    memo: wire.m,
+    createdAt: wire.c,
+    expiresAt: wire.e,
+  };
+}
