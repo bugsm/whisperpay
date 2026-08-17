@@ -62,11 +62,22 @@ export interface PaymentRequest {
  */
 export type RequestStatus = "pending" | "submitted" | "confirmed" | "expired";
 
+/**
+ * What the server keeps about a request, and deliberately all of it.
+ *
+ * The payer's transaction hash is verified when it's reported and then thrown
+ * away rather than stored. Keeping it would undo much of the point: for a payer
+ * who had to shield first, the hash leads straight to a public deposit carrying
+ * their address and the amount. Storing that against a request id would rebuild
+ * the payer↔recipient link the pool exists to break — and hand it to anyone who
+ * has the id, since status is readable by anyone who does.
+ *
+ * So the record is a lifecycle state and two timestamps. Nothing here
+ * identifies a party, a token, or an amount.
+ */
 export interface StatusRecord {
   id: string;
   status: RequestStatus;
-  /** Mainnet transaction hash reported by the payer. */
-  txHash?: string;
   /** Unix seconds. */
   submittedAt?: number;
   /** Unix seconds, set when the recipient confirms receipt. */

@@ -19,6 +19,8 @@ interface CreatedLink {
   id: string;
   url: string;
   path: string;
+  /** Shareable proof-of-payment view. Carries no amount and no addresses. */
+  statusUrl: string;
   /** Set when the created request recurs — changes what the success card says. */
   scheduleLabel?: string;
 }
@@ -42,7 +44,7 @@ export default function CreateRequestForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<CreatedLink | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"pay" | "status" | null>(null);
 
   // Only the *answer* is state. Everything transient — empty, malformed,
   // still-in-flight — is derived from what's currently typed, so there's no
@@ -159,11 +161,12 @@ export default function CreateRequestForm() {
         id: body.id,
         url: body.url,
         path: body.path,
+        statusUrl: body.statusUrl,
         scheduleLabel: body.request.schedule
           ? describeSchedule(body.request.schedule)
           : undefined,
       });
-      setCopied(false);
+      setCopied(null);
 
       // Remembered on this device only, so the dashboard can show what this
       // browser has billed without the server ever holding that list.
@@ -187,12 +190,11 @@ export default function CreateRequestForm() {
     }
   }
 
-  async function copyLink() {
-    if (!created) return;
+  async function copyLink(value: string, which: "pay" | "status") {
     try {
-      await navigator.clipboard.writeText(created.url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(value);
+      setCopied(which);
+      setTimeout(() => setCopied(null), 2000);
     } catch {
       setError("Couldn't copy automatically — select the link and copy it.");
     }
@@ -230,11 +232,42 @@ export default function CreateRequestForm() {
           />
           <button
             type="button"
-            onClick={copyLink}
+            onClick={() => void copyLink(created.url, "pay")}
             className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-[#14101f] transition hover:brightness-110"
           >
-            {copied ? "Copied" : "Copy"}
+            {copied === "pay" ? "Copied" : "Copy"}
           </button>
+        </div>
+
+        {/*
+          A second link, for a different audience. The payment link *is* the
+          invoice — sharing it to show something was paid also shares the amount
+          and both parties. This one shows only the state.
+        */}
+        <div className="mt-5 rounded-xl border border-hairline bg-background p-4">
+          <p className="text-xs font-medium tracking-wide text-muted uppercase">
+            Status link
+          </p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <input
+              readOnly
+              value={created.statusUrl}
+              onFocus={(event) => event.currentTarget.select()}
+              className="min-w-0 flex-1 rounded-lg border border-hairline bg-surface px-3 py-2 font-mono text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => void copyLink(created.statusUrl, "status")}
+              className="rounded-lg border border-hairline px-3 py-2 text-xs transition hover:bg-surface-raised"
+            >
+              {copied === "status" ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <p className="mt-2.5 text-xs leading-relaxed text-muted">
+            Share this one to show whether you've been paid. It carries no
+            amount, neither address, no note and no transaction — only unpaid,
+            submitted, or received.
+          </p>
         </div>
 
         <div className="mt-5 flex flex-wrap gap-3 text-sm">
@@ -248,6 +281,7 @@ export default function CreateRequestForm() {
             type="button"
             onClick={() => {
               setCreated(null);
+              setCopied(null);
               setAmount("");
               setMemo("");
             }}

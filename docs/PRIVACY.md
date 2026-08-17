@@ -114,7 +114,12 @@ Whisper Pay's backend is deliberately thin.
 - **The list of links you created lives in your browser's localStorage**, not on
   the server. Clearing site data clears it.
 - **Status is opt-in and minimal.** If a KV store is configured, the server holds
-  `{id, status, txHash}` — no amounts, no addresses.
+  `{id, status, submittedAt?, confirmedAt?}` — no amounts, no addresses, and
+  **not the transaction hash**. The hash is verified when it's reported and then
+  discarded: for a payer who shielded in order to pay, it leads straight to a
+  public deposit carrying their address, so storing it against a request id
+  would rebuild exactly the link the pool exists to break. Status is readable by
+  anyone holding the id, which is the other half of the reason.
 - **The server never sees a viewing key or a private key.** Every pool operation
   goes through the user's wallet via the STRK20 Wallet API.
 
@@ -144,6 +149,35 @@ Resolution runs against the Starknet ID naming contract through the app's own
 RPC. The public HTTP resolver would work too, but it would tell a third party
 which names are being looked up.
 
+## The public status page
+
+A payment link cannot double as proof of payment. It *is* the invoice — the
+amount, the recipient and the note are all encoded in it, so handing it to an
+accountant, a client's finance team, or a public page hands them everything.
+
+`/s/<id>` exists to be shared instead. It is addressed by the request id alone,
+and an id is 72 random bits that describe nothing: no amount, no token, neither
+party, no note. What a reader learns is one fact per period — unpaid, submitted
+or received — and the date it changed.
+
+That page can only be this thin because the record behind it is. Since the
+server never stores the transaction hash, there is nothing on the page to
+redact and nothing at the API next door to leak — `/api/status/<id>` returns
+the same fields to anyone holding the same id.
+
+Two smaller choices follow from the same reasoning:
+
+- **Dates are shown to the day, in UTC.** A precise timestamp would narrow a
+  private transfer to the handful of pool transactions in that second, which is
+  a strange thing to publish on a page whose point is publishing almost nothing.
+- **The page is `noindex`.** Status links are meant to be handed to someone, not
+  crawled into a search index where ids become discoverable.
+
+A recurring request carries its schedule in the URL's `s` parameter, so the page
+can say "payment 3 of 12" and list recent periods. That parameter reveals
+cadence and length — worth knowing before you share one — and still nothing
+about amount or parties.
+
 ## Why "submitted" and "confirmed" are different states
 
 When a payer completes a payment, their browser reports the transaction hash.
@@ -154,6 +188,10 @@ That is the *most* anyone can verify from a hash. Because a private transfer
 hides its amount and its parties, nobody — not the server, not an observer, not
 us — can prove from the chain that a given transaction paid a given request. A
 payer could report an unrelated pool transaction and it would verify.
+
+Since the hash proves so little and reveals so much, it isn't kept: verification
+happens at the moment it's reported, and what survives is that *a* verified pool
+transaction was reported, and when.
 
 So the request moves to **submitted**, not paid. Only the recipient, looking at
 their own shielded balance through their own viewing key, can tell that the money

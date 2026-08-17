@@ -6,6 +6,7 @@ import Link from "next/link";
 import ConnectWallet from "@/components/wallet/ConnectWallet";
 import { useWallet, type WalletState } from "@/components/wallet/walletStore";
 import { AmountError, formatDisplay, parseUnits } from "@/lib/amount";
+import { statusPath } from "@/lib/request/codec";
 import {
   loadHistory,
   removeFromHistory,
@@ -448,11 +449,23 @@ function RequestList() {
               <div className="flex shrink-0 gap-1.5">
                 <button
                   type="button"
-                  title="Copy link"
+                  title="Copy the payment link — this is the invoice"
                   onClick={() => void navigator.clipboard.writeText(entry.url)}
                   className="rounded-lg border border-hairline px-2 py-1 text-xs transition hover:bg-surface-raised"
                 >
                   Copy
+                </button>
+                <button
+                  type="button"
+                  title="Copy the status link — paid or unpaid, nothing else"
+                  onClick={() =>
+                    void navigator.clipboard.writeText(
+                      `${window.location.origin}${statusPath(entry.id, entry.schedule)}`
+                    )
+                  }
+                  className="rounded-lg border border-hairline px-2 py-1 text-xs text-muted transition hover:bg-surface-raised hover:text-foreground"
+                >
+                  Status
                 </button>
                 {status === "submitted" ? (
                   <button

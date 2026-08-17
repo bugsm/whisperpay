@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 
 import { AmountError, parseUnits } from "@/lib/amount";
 import { isStarkDomain, resolveStarkName } from "@/lib/identity/starknetid";
-import { encodeRequest, newRequestId } from "@/lib/request/codec";
+import { encodeRequest, newRequestId, statusPath } from "@/lib/request/codec";
 import {
   isValidSchedule,
   scheduleEndsAt,
@@ -168,11 +168,17 @@ export async function POST(request: NextRequest) {
   const encoded = encodeRequest(paymentRequest);
   const path = `/pay/${encoded}`;
 
+  // The status link is the one that's safe to hand to a third party: it says
+  // whether this was paid and nothing about what it was.
+  const statusHref = statusPath(paymentRequest.id, paymentRequest.schedule);
+
   return Response.json(
     {
       id: paymentRequest.id,
       path,
       url: absoluteUrl(request, path),
+      statusPath: statusHref,
+      statusUrl: absoluteUrl(request, statusHref),
       request: {
         recipient: paymentRequest.recipient,
         recipientName: paymentRequest.recipientName ?? null,

@@ -11,6 +11,12 @@ import { isValidTxHash, verifyPoolTransaction } from "@/lib/strk20/verify";
  * and only here. Paying never depends on this endpoint: if no store is
  * configured, status simply stays unknown and the payment flow is unaffected.
  *
+ * Everything here is readable by anyone holding the id, so a record is kept
+ * deliberately empty of anything worth reading: a lifecycle state and two
+ * timestamps. The reported transaction hash is verified and discarded rather
+ * than stored — `StatusRecord` explains why. `/s/<id>` renders this same data
+ * as a page that can be shared without sharing the invoice.
+ *
  * GET  → the current record, or `pending` when nothing has been recorded.
  * POST → `{ txHash }` to report a submitted payment (verified on-chain first),
  *        or `{ action: "confirm" }` for the recipient to confirm receipt.
@@ -102,10 +108,11 @@ export async function POST(
     );
   }
 
+  // The hash is verified and then dropped — see `StatusRecord`. What's kept is
+  // that *a* verified pool transaction was reported, and when.
   const record: StatusRecord = {
     id,
     status: "submitted" satisfies RequestStatus,
-    txHash: input.txHash,
     submittedAt: now,
   };
   return persist(store, record, verification);

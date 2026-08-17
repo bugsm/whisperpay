@@ -113,6 +113,55 @@ export function encodeRequest(request: PaymentRequest): string {
   return bytesToBase64Url(new TextEncoder().encode(JSON.stringify(wire)));
 }
 
+/**
+ * The path of a request's **public status page**.
+ *
+ * Addressed by id alone, because the id is the one part of a request that
+ * describes nothing about it — 72 random bits, no amount, no addresses, no
+ * memo. That's what makes the page shareable with someone who shouldn't see the
+ * invoice itself.
+ *
+ * A recurring request needs its schedule too, or the page could only ever
+ * describe a single period. The `s` parameter carries cadence and length and
+ * nothing else, so the page gains "payment 3 of 12" without gaining anything
+ * about who or how much.
+ */
+export function statusPath(id: string, schedule?: Schedule): string {
+  return schedule
+    ? `/s/${id}?s=${encodeSchedule(schedule)}`
+    : `/s/${id}`;
+}
+
+export function encodeSchedule(schedule: Schedule): string {
+  const wire: WireSchedule = {
+    u: UNIT_TO_WIRE[schedule.unit],
+    e: schedule.every,
+    a: schedule.anchor,
+  };
+  if (schedule.count !== null) wire.c = schedule.count;
+  return bytesToBase64Url(new TextEncoder().encode(JSON.stringify(wire)));
+}
+
+/** `null` for anything malformed — the status page says so rather than guessing. */
+export function decodeSchedule(encoded: string): Schedule | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(base64UrlToBytes(encoded)));
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+
+  const wire = parsed as Partial<WireSchedule>;
+  const candidate = {
+    unit: WIRE_TO_UNIT[wire.u as string],
+    every: wire.e,
+    count: wire.c ?? null,
+    anchor: wire.a,
+  };
+  return isValidSchedule(candidate) ? candidate : null;
+}
+
 export function decodeRequest(encoded: string): PaymentRequest {
   let parsed: unknown;
   try {

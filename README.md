@@ -38,11 +38,11 @@ Following [Private Sprint (STRK20)](https://strk20.starknet.io/hackathon), Aug 1
 * ✅ **M2:** paid-detection + private balance dashboard (viewing key)
 * ✅ **M3:** unshield ("withdraw to spend") + pay-by-identifier lookup (Starknet ID)
 * ✅ **M4:** recurring payment requests (subscriptions / repeat invoices)
-* **M5:** stretch — public status page per link (paid / pending) without revealing amount or parties
+* ✅ **M5:** stretch — public status page per link (paid / pending) without revealing amount or parties
 
 ## Status
 
-M1–M4 are built and running against mainnet infrastructure. Still to do: the
+M1–M5 are built and running against mainnet infrastructure. Still to do: the
 three real pool transactions for `strk20.json`, a demo video, and a public
 deployment — see [Getting to mainnet](#getting-to-mainnet).
 
@@ -103,6 +103,24 @@ without drifting ([`src/lib/request/schedule.ts`](src/lib/request/schedule.ts)).
 Repetition has a privacy cost of its own — a shield-per-payment cadence is a
 strong fingerprint even when every transfer stays hidden. `docs/PRIVACY.md`
 covers it and what to do instead.
+
+### The status link
+
+Every request comes with a second link, `/s/<id>`, and the difference between
+the two is the point. The payment link *is* the invoice: it carries the amount,
+the recipient and the note, so sharing it to prove you were paid shares all of
+that too. The status link carries a request id — 72 random bits that describe
+nothing — and renders one fact: unpaid, submitted, or received.
+
+That page can be as thin as it is because the record behind it is. The payer's
+transaction hash is verified when reported and then **discarded rather than
+stored**: for someone who shielded in order to pay, that hash leads straight to
+a public deposit with their address on it, and status is readable by anyone
+holding the id. So the server keeps a lifecycle state and two timestamps, and
+that is the whole of it.
+
+Recurring links carry their schedule in the URL, so the page shows "payment 3 of
+12" and the recent periods — cadence and length, still no amount and no parties.
 
 ### Getting to mainnet
 
