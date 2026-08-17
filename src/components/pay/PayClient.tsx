@@ -6,7 +6,14 @@ import ConnectWallet from "@/components/wallet/ConnectWallet";
 import { useWallet } from "@/components/wallet/walletStore";
 import { formatDisplay } from "@/lib/amount";
 import type { NameCheck } from "@/lib/identity/starknetid";
-import { isExpired } from "@/lib/request/types";
+import {
+  currentInstallment,
+  describePeriod,
+  installmentStatusId,
+  type Installment,
+  type Schedule,
+} from "@/lib/request/schedule";
+import { isExpired, type RequestStatus } from "@/lib/request/types";
 import {
   findToken,
   normalizeAddress,
@@ -28,6 +35,8 @@ export interface PayRequestDto {
   memo?: string;
   createdAt: number;
   expiresAt?: number;
+  /** Present when this link asks for the same amount every period. */
+  schedule?: Schedule;
 }
 
 type Phase =
@@ -59,6 +68,9 @@ export default function PayClient({
   const [phase, setPhase] = useState<Phase>({ name: "idle" });
   const [roundUp, setRoundUp] = useState(false);
   const [expired, setExpired] = useState(false);
+  const [installment, setInstallment] = useState<Installment | null>(null);
+  const [settled, setSettled] = useState<RequestStatus | null>(null);
+  const [payAnyway, setPayAnyway] = useState(false);
 
   const token = findToken(request.token);
   const amount = BigInt(request.amount);
@@ -71,6 +83,47 @@ export default function PayClient({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setExpired(isExpired(request));
   }, [request]);
+
+  // Which installment a recurring link is asking for also depends on the clock,
+  // so it's resolved here for the same reason.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setInstallment(
+      request.schedule ? currentInstallment(request.schedule) : null
+    );
+  }, [request]);
+
+  /** Per-installment for a recurring link; the bare id for a one-off. */
+  const statusId = installment
+    ? installmentStatusId(request.id, installment.index)
+    : request.id;
+
+  // A repeat invoice is the one case where "has this already been paid?" is
+  // worth asking before showing a Pay button: the same URL is opened over and
+  // over, and a payer can't tell this month's ask from last month's by looking.
+  // Advisory only — the store is optional, and status can't prove payment.
+  useEffect(() => {
+    if (!installment) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/status/${statusId}`);
+        if (!response.ok) return;
+        const body = await response.json();
+        const status = body.record?.status as RequestStatus | undefined;
+        if (!cancelled && (status === "submitted" || status === "confirmed")) {
+          setSettled(status);
+        }
+      } catch {
+        /* status is a convenience — paying never depends on it */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [installment, statusId]);
 
   // Balances are per-account and per-network, so read them once we have both.
   useEffect(() => {
@@ -138,7 +191,7 @@ export default function PayClient({
 
     // Best-effort status report. The payment is already done — a failure here
     // only means the recipient's dashboard won't show it as submitted.
-    void fetch(`/api/status/${request.id}`, {
+    void fetch(`/api/status/${statusId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ txHash }),
@@ -151,9 +204,19 @@ export default function PayClient({
     <div className="space-y-5">
       <Card>
         <p className="text-xs font-medium tracking-wide text-muted uppercase">
-          Payment request
+          {request.schedule ? "Recurring payment request" : "Payment request"}
         </p>
         <p className="tabular mt-2 text-4xl font-semibold">{amountLabel}</p>
+        {request.schedule && installment ? (
+          <p className="mt-1.5 text-sm text-muted">
+            <span className="text-foreground">
+              Payment {installment.number}
+              {installment.total ? ` of ${installment.total}` : ""}
+            </span>{" "}
+            · {describePeriod(request.schedule).toLowerCase()}, each approved in
+            your wallet
+          </p>
+        ) : null}
         {request.memo ? (
           <p className="mt-2 text-sm text-foreground/80">{request.memo}</p>
         ) : null}
@@ -172,7 +235,20 @@ export default function PayClient({
             )}
           </Row>
           <Row label="Network">Starknet mainnet</Row>
-          {request.expiresAt ? (
+          {installment ? (
+            <>
+              <Row label={installment.notStarted ? "Starts" : "Due"}>
+                {formatDate(installment.dueAt)}
+              </Row>
+              {installment.nextDueAt ? (
+                <Row label="Next payment">
+                  <span className="text-muted">
+                    {formatDate(installment.nextDueAt)}
+                  </span>
+                </Row>
+              ) : null}
+            </>
+          ) : request.expiresAt ? (
             <Row label={expired ? "Expired" : "Expires"}>
               {new Date(request.expiresAt * 1000).toLocaleString()}
             </Row>
@@ -196,12 +272,29 @@ export default function PayClient({
       ) : null}
 
       {expired ? (
-        <Notice tone="warn" title="This link has expired">
-          Ask whoever sent it for a fresh one. Paying an expired request would
-          still move funds, so Whisper Pay won't submit it.
-        </Notice>
+        request.schedule ? (
+          <Notice tone="warn" title="This subscription has finished">
+            Its final payment period is over, so Whisper Pay won't submit another
+            one. If it should continue, ask whoever sent it for a fresh link.
+          </Notice>
+        ) : (
+          <Notice tone="warn" title="This link has expired">
+            Ask whoever sent it for a fresh one. Paying an expired request would
+            still move funds, so Whisper Pay won't submit it.
+          </Notice>
+        )
       ) : phase.name === "paid" ? (
-        <PaidCard txHash={phase.txHash} amountLabel={amountLabel} />
+        <PaidCard
+          txHash={phase.txHash}
+          amountLabel={amountLabel}
+          installment={installment}
+        />
+      ) : settled && !payAnyway ? (
+        <SettledCard
+          status={settled}
+          installment={installment}
+          onPayAnyway={() => setPayAnyway(true)}
+        />
       ) : (
         <Card>
           {!isConnected ? (
@@ -391,19 +484,38 @@ function PlanView({
   );
 }
 
-function PaidCard({ txHash, amountLabel }: { txHash: string; amountLabel: string }) {
+function PaidCard({
+  txHash,
+  amountLabel,
+  installment,
+}: {
+  txHash: string;
+  amountLabel: string;
+  installment: Installment | null;
+}) {
   return (
     <Card>
       <div className="flex items-center gap-2.5">
         <span className="flex size-7 items-center justify-center rounded-full bg-emerald-400/15 text-sm text-emerald-400">
           ✓
         </span>
-        <h2 className="font-semibold">Paid {amountLabel}</h2>
+        <h2 className="font-semibold">
+          Paid {amountLabel}
+          {installment
+            ? ` — payment ${installment.number}${installment.total ? ` of ${installment.total}` : ""}`
+            : ""}
+        </h2>
       </div>
       <p className="mt-3 text-sm leading-relaxed text-muted">
         The private transfer is on-chain. The recipient sees it in their shielded
         balance — nobody else sees the amount or who it went to.
       </p>
+      {installment?.nextDueAt ? (
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          The next payment is due {formatDate(installment.nextDueAt)}. Keep this
+          link — open it again then, and it'll ask for that one.
+        </p>
+      ) : null}
       <a
         href={`${VOYAGER_TX_URL}${txHash}`}
         target="_blank"
@@ -412,6 +524,55 @@ function PaidCard({ txHash, amountLabel }: { txHash: string; amountLabel: string
       >
         {txHash.slice(0, 10)}…{txHash.slice(-6)} ↗
       </a>
+    </Card>
+  );
+}
+
+/**
+ * Shown when this installment already has a reported payment against it.
+ *
+ * Deliberately not a block. The record only proves *a* pool transaction was
+ * reported for this period — it can't prove the payment, and the store is
+ * optional, so the payer gets the warning and the last word.
+ */
+function SettledCard({
+  status,
+  installment,
+  onPayAnyway,
+}: {
+  status: RequestStatus;
+  installment: Installment | null;
+  onPayAnyway: () => void;
+}) {
+  const label = installment
+    ? `Payment ${installment.number}${installment.total ? ` of ${installment.total}` : ""}`
+    : "This request";
+
+  return (
+    <Card>
+      <h2 className="text-sm font-semibold">
+        {label}{" "}
+        {status === "confirmed"
+          ? "has been received"
+          : "has already been submitted"}
+      </h2>
+      <p className="mt-2 text-sm leading-relaxed text-muted">
+        {status === "confirmed"
+          ? "The recipient confirmed this one landed in their shielded balance."
+          : "Someone reported a pool transaction for this period. That's not proof of payment — a private transfer hides its amount and parties — so if it wasn't you, or you're not sure it went through, you can still pay."}
+      </p>
+      {installment?.nextDueAt ? (
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          The next payment is due {formatDate(installment.nextDueAt)}.
+        </p>
+      ) : null}
+      <button
+        type="button"
+        onClick={onPayAnyway}
+        className="mt-4 rounded-xl border border-hairline px-4 py-2 text-sm transition hover:bg-surface-raised"
+      >
+        Pay it anyway
+      </button>
     </Card>
   );
 }
@@ -475,6 +636,15 @@ function WalletLinks() {
       ))}
     </>
   );
+}
+
+/** Dates only ever render after mount, so the payer's own locale is safe here. */
+function formatDate(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function Card({ children }: { children: React.ReactNode }) {

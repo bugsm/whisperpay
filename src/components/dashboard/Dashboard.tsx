@@ -11,6 +11,11 @@ import {
   removeFromHistory,
   type HistoryEntry,
 } from "@/lib/request/history";
+import {
+  currentInstallment,
+  describePeriod,
+  installmentStatusId,
+} from "@/lib/request/schedule";
 import type { RequestStatus } from "@/lib/request/types";
 import {
   DEFAULT_TOKEN,
@@ -316,6 +321,19 @@ function WithdrawCard({
   );
 }
 
+/**
+ * Where a request's status lives: per installment for a recurring link, so the
+ * badge tracks *this* period rather than the first one ever paid.
+ *
+ * Safe to call during render — `entries` only arrives after mount, so nothing
+ * clock-dependent is ever server-rendered.
+ */
+function statusKeyFor(entry: HistoryEntry): string {
+  return entry.schedule
+    ? installmentStatusId(entry.id, currentInstallment(entry.schedule).index)
+    : entry.id;
+}
+
 function RequestList() {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [statuses, setStatuses] = useState<Record<string, RequestStatus>>({});
@@ -338,7 +356,7 @@ function RequestList() {
       const results = await Promise.all(
         entries.map(async (entry) => {
           try {
-            const response = await fetch(`/api/status/${entry.id}`);
+            const response = await fetch(`/api/status/${statusKeyFor(entry)}`);
             if (!response.ok) {
               return [entry.id, "pending" as RequestStatus] as const;
             }
@@ -357,14 +375,14 @@ function RequestList() {
     };
   }, [entries]);
 
-  async function confirm(id: string) {
+  async function confirm(entry: HistoryEntry) {
     try {
-      await fetch(`/api/status/${id}`, {
+      await fetch(`/api/status/${statusKeyFor(entry)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "confirm" }),
       });
-      setStatuses((prev) => ({ ...prev, [id]: "confirmed" }));
+      setStatuses((prev) => ({ ...prev, [entry.id]: "confirmed" }));
     } catch {
       /* leave the badge as it was */
     }
@@ -396,19 +414,32 @@ function RequestList() {
       <ul className="mt-4 divide-y divide-[var(--hairline)]">
         {entries.map((entry) => {
           const status = statuses[entry.id] ?? "pending";
+          const cycle = entry.schedule
+            ? currentInstallment(entry.schedule)
+            : null;
           return (
             <li key={entry.id} className="flex items-center gap-3 py-3">
               <div className="min-w-0 flex-1">
                 <p className="tabular text-sm font-medium">
                   {formatDisplay(BigInt(entry.amount), DEFAULT_TOKEN.decimals)}{" "}
                   {DEFAULT_TOKEN.symbol}
+                  {entry.schedule ? (
+                    <span className="font-normal text-muted">
+                      {" "}
+                      / {describePeriod(entry.schedule).toLowerCase()}
+                    </span>
+                  ) : null}
                   {entry.memo ? (
                     <span className="ml-2 font-normal text-muted">{entry.memo}</span>
                   ) : null}
                 </p>
                 <p className="mt-0.5 text-xs text-muted">
                   {entry.recipientName ? `${entry.recipientName} · ` : ""}
-                  {new Date(entry.createdAt * 1000).toLocaleDateString()}
+                  {cycle
+                    ? cycle.ended
+                      ? "Finished"
+                      : `Payment ${cycle.number}${cycle.total ? ` of ${cycle.total}` : ""} due ${new Date(cycle.dueAt * 1000).toLocaleDateString()}`
+                    : new Date(entry.createdAt * 1000).toLocaleDateString()}
                 </p>
               </div>
 
@@ -427,7 +458,7 @@ function RequestList() {
                   <button
                     type="button"
                     title="Mark as received"
-                    onClick={() => void confirm(entry.id)}
+                    onClick={() => void confirm(entry)}
                     className="rounded-lg border border-emerald-400/40 px-2 py-1 text-xs text-emerald-300 transition hover:bg-emerald-400/10"
                   >
                     Confirm
@@ -457,6 +488,14 @@ function RequestList() {
         transfer hides its amount and parties. Check your shielded balance above,
         then confirm.
       </p>
+      {entries.some((entry) => entry.schedule) ? (
+        <p className="mt-3 text-xs leading-relaxed text-muted">
+          <strong className="font-medium text-foreground">Recurring links</strong>{" "}
+          show the period that's currently due — each one is tracked separately,
+          so confirming this month doesn't mark next month paid. To cancel one,
+          stop sharing it: nothing can be charged without the payer approving it.
+        </p>
+      ) : null}
     </section>
   );
 }

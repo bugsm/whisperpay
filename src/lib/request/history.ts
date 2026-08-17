@@ -10,6 +10,8 @@
  * trade for this app.
  */
 
+import { isValidSchedule, type Schedule } from "./schedule";
+
 const STORAGE_KEY = "whisperpay.requests.v1";
 
 /** Plenty for a demo or a freelancer's month; keeps localStorage small. */
@@ -23,11 +25,13 @@ export interface HistoryEntry {
   /** `.stark` label the request was created against, when there was one. */
   recipientName?: string;
   token: string;
-  /** Smallest-unit amount, as a decimal string. */
+  /** Smallest-unit amount, as a decimal string. Per installment if recurring. */
   amount: string;
   memo?: string;
   createdAt: number;
   expiresAt?: number;
+  /** Present for a recurring request. Entries created before M4 have none. */
+  schedule?: Schedule;
 }
 
 function isEntry(value: unknown): value is HistoryEntry {
@@ -48,7 +52,16 @@ export function loadHistory(): HistoryEntry[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isEntry).sort((a, b) => b.createdAt - a.createdAt);
+    return parsed
+      .filter(isEntry)
+      // A malformed schedule would render as "Invalid Date" forever; the rest
+      // of the entry is still useful, so drop just the schedule.
+      .map((entry) =>
+        entry.schedule && !isValidSchedule(entry.schedule)
+          ? { ...entry, schedule: undefined }
+          : entry
+      )
+      .sort((a, b) => b.createdAt - a.createdAt);
   } catch {
     return [];
   }

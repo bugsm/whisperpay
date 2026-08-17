@@ -10,6 +10,8 @@
  * that lives in the optional status store (`@/lib/store`), keyed by `id`.
  */
 
+import type { Schedule } from "./schedule";
+
 export interface PaymentRequest {
   /** Random, unique per request. Also the key for the optional status store. */
   id: string;
@@ -28,8 +30,19 @@ export interface PaymentRequest {
   recipientName?: string;
   /** Token contract address. */
   token: string;
-  /** Amount owed, in the token's smallest unit. */
+  /**
+   * Amount owed, in the token's smallest unit. Per installment when the
+   * request recurs.
+   */
   amount: bigint;
+  /**
+   * Present when the request repeats — a subscription or a standing invoice.
+   *
+   * The same link then asks for `amount` once per period, and the payer
+   * approves each one; nothing about a schedule authorises a future charge.
+   * See `./schedule`.
+   */
+  schedule?: Schedule;
   /** Optional note from the requester ("Invoice #42"). Shown to the payer. */
   memo?: string;
   /** Unix seconds. */

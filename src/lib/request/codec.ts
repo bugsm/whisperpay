@@ -13,13 +13,15 @@
 
 import { isStarkDomain } from "@/lib/identity/encoding";
 import { isValidAddress, findToken, normalizeAddress } from "@/lib/strk20/constants";
+import { isValidSchedule, type PeriodUnit, type Schedule } from "./schedule";
 import { MAX_MEMO_LENGTH, type PaymentRequest } from "./types";
 
 export class RequestDecodeError extends Error {}
 
 /** Compact wire shape. Short keys keep links short. */
-interface WireV1 {
-  v: 1;
+interface Wire {
+  /** 1 for a one-off request, 2 when a schedule is attached. */
+  v: 1 | 2;
   i: string;
   r: string;
   t: string;
@@ -30,7 +32,30 @@ interface WireV1 {
   e?: number;
   /** Optional `.stark` display label. Added after v1 shipped; older links omit it. */
   n?: string;
+  /** Recurrence. Only ever present on v2. */
+  s?: WireSchedule;
 }
+
+/** `{unit, every, count, anchor}`, one letter each. */
+interface WireSchedule {
+  u: "d" | "w" | "m";
+  e: number;
+  /** Omitted for an open-ended schedule. */
+  c?: number;
+  a: number;
+}
+
+const UNIT_TO_WIRE: Record<PeriodUnit, WireSchedule["u"]> = {
+  day: "d",
+  week: "w",
+  month: "m",
+};
+
+const WIRE_TO_UNIT: Record<string, PeriodUnit> = {
+  d: "day",
+  w: "week",
+  m: "month",
+};
 
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = "";
@@ -63,8 +88,10 @@ export function newRequestId(): string {
 }
 
 export function encodeRequest(request: PaymentRequest): string {
-  const wire: WireV1 = {
-    v: 1,
+  // A recurring link is v2 so that a build predating M4 refuses it outright
+  // rather than quietly reading it as a single payment for one installment.
+  const wire: Wire = {
+    v: request.schedule ? 2 : 1,
     i: request.id,
     r: request.recipient,
     t: request.token,
@@ -74,6 +101,14 @@ export function encodeRequest(request: PaymentRequest): string {
   if (request.memo) wire.m = request.memo;
   if (request.expiresAt !== undefined) wire.e = request.expiresAt;
   if (request.recipientName) wire.n = request.recipientName;
+  if (request.schedule) {
+    wire.s = {
+      u: UNIT_TO_WIRE[request.schedule.unit],
+      e: request.schedule.every,
+      a: request.schedule.anchor,
+    };
+    if (request.schedule.count !== null) wire.s.c = request.schedule.count;
+  }
 
   return bytesToBase64Url(new TextEncoder().encode(JSON.stringify(wire)));
 }
@@ -90,12 +125,17 @@ export function decodeRequest(encoded: string): PaymentRequest {
   if (typeof parsed !== "object" || parsed === null) {
     throw new RequestDecodeError("Link payload isn't an object.");
   }
-  const wire = parsed as Partial<WireV1>;
+  const wire = parsed as Partial<Wire>;
 
-  if (wire.v !== 1) {
+  if (wire.v !== 1 && wire.v !== 2) {
     throw new RequestDecodeError(
       "This link was made by a newer version of Whisper Pay."
     );
+  }
+  // A schedule on a v1 payload would be read as a one-off by anything older,
+  // which is exactly the mistake the version bump exists to prevent.
+  if (wire.v === 1 && wire.s !== undefined) {
+    throw new RequestDecodeError("Link's version doesn't match its contents.");
   }
 
   if (typeof wire.i !== "string" || !/^[A-Za-z0-9_-]{1,32}$/.test(wire.i)) {
@@ -151,6 +191,25 @@ export function decodeRequest(encoded: string): PaymentRequest {
     }
   }
 
+  // The schedule drives what the payer is asked for and when, so it gets the
+  // same treatment as the amount: fully validated, or the link is refused.
+  let schedule: Schedule | undefined;
+  if (wire.s !== undefined) {
+    if (typeof wire.s !== "object" || wire.s === null) {
+      throw new RequestDecodeError("Link carries an invalid schedule.");
+    }
+    const candidate = {
+      unit: WIRE_TO_UNIT[wire.s.u],
+      every: wire.s.e,
+      count: wire.s.c ?? null,
+      anchor: wire.s.a,
+    };
+    if (!isValidSchedule(candidate)) {
+      throw new RequestDecodeError("Link carries an invalid schedule.");
+    }
+    schedule = candidate;
+  }
+
   return {
     id: wire.i,
     recipient: normalizeAddress(wire.r),
@@ -160,5 +219,6 @@ export function decodeRequest(encoded: string): PaymentRequest {
     memo: wire.m,
     createdAt: wire.c,
     expiresAt: wire.e,
+    schedule,
   };
 }

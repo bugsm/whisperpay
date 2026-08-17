@@ -6,6 +6,12 @@ import Link from "next/link";
 import { useWallet } from "@/components/wallet/walletStore";
 import { isStarkDomain } from "@/lib/identity/encoding";
 import { saveToHistory } from "@/lib/request/history";
+import {
+  describeSchedule,
+  MAX_INSTALLMENTS,
+  MIN_INSTALLMENTS,
+  SCHEDULE_PRESETS,
+} from "@/lib/request/schedule";
 import { EXPIRY_PRESETS, MAX_MEMO_LENGTH } from "@/lib/request/types";
 import { DEFAULT_TOKEN, isValidAddress } from "@/lib/strk20/constants";
 
@@ -13,6 +19,8 @@ interface CreatedLink {
   id: string;
   url: string;
   path: string;
+  /** Set when the created request recurs — changes what the success card says. */
+  scheduleLabel?: string;
 }
 
 /** What we know about whatever the user typed into "Paid to". */
@@ -29,6 +37,8 @@ export default function CreateRequestForm() {
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
   const [expiryIndex, setExpiryIndex] = useState(2); // 7 days
+  const [repeatIndex, setRepeatIndex] = useState(0); // one-off
+  const [installments, setInstallments] = useState(""); // blank = until cancelled
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<CreatedLink | null>(null);
@@ -45,6 +55,18 @@ export default function CreateRequestForm() {
   const looksValid =
     isValidAddress(recipient) || isStarkDomain(recipient.toLowerCase());
   const recipientValid = recipient === "" || looksValid;
+
+  // Recurrence. A blank count means "until cancelled" — the common case for a
+  // subscription, and the reason the field isn't `required`.
+  const repeat = SCHEDULE_PRESETS[repeatIndex];
+  const recurring = repeat.spec !== null;
+  const installmentCount =
+    installments.trim() === "" ? null : Number(installments);
+  const installmentsValid =
+    installmentCount === null ||
+    (Number.isInteger(installmentCount) &&
+      installmentCount >= MIN_INSTALLMENTS &&
+      installmentCount <= MAX_INSTALLMENTS);
 
   const resolution: Resolution =
     recipient === ""
@@ -103,6 +125,12 @@ export default function CreateRequestForm() {
       setError(resolution.message);
       return;
     }
+    if (recurring && !installmentsValid) {
+      setError(
+        `Number of payments must be between ${MIN_INSTALLMENTS} and ${MAX_INSTALLMENTS}, or blank for no end date.`
+      );
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -114,7 +142,12 @@ export default function CreateRequestForm() {
           amount,
           token: DEFAULT_TOKEN.address,
           memo: memo || undefined,
-          expiresIn: EXPIRY_PRESETS[expiryIndex].seconds,
+          // A recurring link's lifetime is its schedule's, so the two settings
+          // are mutually exclusive — the API rejects both together.
+          expiresIn: recurring ? undefined : EXPIRY_PRESETS[expiryIndex].seconds,
+          schedule: repeat.spec
+            ? { ...repeat.spec, count: installmentCount }
+            : undefined,
         }),
       });
       const body = await response.json();
@@ -122,7 +155,14 @@ export default function CreateRequestForm() {
         setError(body.error ?? "Could not create the request.");
         return;
       }
-      setCreated({ id: body.id, url: body.url, path: body.path });
+      setCreated({
+        id: body.id,
+        url: body.url,
+        path: body.path,
+        scheduleLabel: body.request.schedule
+          ? describeSchedule(body.request.schedule)
+          : undefined,
+      });
       setCopied(false);
 
       // Remembered on this device only, so the dashboard can show what this
@@ -138,6 +178,7 @@ export default function CreateRequestForm() {
         memo: body.request.memo ?? undefined,
         createdAt: body.request.createdAt,
         expiresAt: body.request.expiresAt ?? undefined,
+        schedule: body.request.schedule ?? undefined,
       });
     } catch {
       setError("Could not reach the server. Check your connection and retry.");
@@ -160,10 +201,24 @@ export default function CreateRequestForm() {
   if (created) {
     return (
       <section className="rounded-2xl border border-hairline bg-surface p-6">
-        <h2 className="text-lg font-semibold">Your payment link is ready</h2>
+        <h2 className="text-lg font-semibold">
+          {created.scheduleLabel
+            ? "Your recurring link is ready"
+            : "Your payment link is ready"}
+        </h2>
         <p className="mt-1 text-sm leading-relaxed text-muted">
-          Anyone with this link can pay you privately. The request lives entirely
-          in the link — there's no database entry to lose.
+          {created.scheduleLabel ? (
+            <>
+              <span className="text-foreground">{created.scheduleLabel}.</span>{" "}
+              Send it once — it asks for the current payment every period, and
+              the payer approves each one in their wallet.
+            </>
+          ) : (
+            <>
+              Anyone with this link can pay you privately. The request lives
+              entirely in the link — there's no database entry to lose.
+            </>
+          )}
         </p>
 
         <div className="mt-5 flex flex-col gap-2 sm:flex-row">
@@ -246,7 +301,7 @@ export default function CreateRequestForm() {
           <ResolutionHint resolution={resolution} typed={recipient} />
         </Field>
 
-        <Field label="Amount">
+        <Field label={recurring ? "Amount per payment" : "Amount"}>
           <div className="flex items-center gap-2 rounded-xl border border-hairline bg-background px-3 py-2.5 transition focus-within:border-accent">
             <input
               value={amount}
@@ -262,6 +317,49 @@ export default function CreateRequestForm() {
           </div>
         </Field>
 
+        <Field label="Repeats">
+          <div className="flex flex-wrap gap-2">
+            {SCHEDULE_PRESETS.map((preset, index) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => setRepeatIndex(index)}
+                className={`rounded-lg border px-3 py-1.5 text-xs transition ${
+                  index === repeatIndex
+                    ? "border-accent bg-accent-soft text-foreground"
+                    : "border-hairline text-muted hover:bg-surface-raised"
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          {recurring ? (
+            <div className="mt-3 rounded-xl border border-hairline bg-background p-4">
+              {/* Not a <label> — `Field` already is one, and they can't nest. */}
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-muted">Number of payments</span>
+                <input
+                  aria-label="Number of payments"
+                  value={installments}
+                  onChange={(event) => setInstallments(event.target.value.trim())}
+                  inputMode="numeric"
+                  placeholder="Until cancelled"
+                  className={`tabular w-36 rounded-lg border bg-surface px-2.5 py-1.5 outline-none transition focus:border-accent ${
+                    installmentsValid ? "border-hairline" : "border-red-500/60"
+                  }`}
+                />
+              </div>
+              <p className="mt-2.5 text-xs leading-relaxed text-muted">
+                The payer approves every payment in their own wallet — a link
+                can't charge anyone. Leave the count blank and it simply keeps
+                asking until you stop sharing it.
+              </p>
+            </div>
+          ) : null}
+        </Field>
+
         <Field label="Note" hint="Shown to the payer. Never goes on-chain.">
           <input
             value={memo}
@@ -272,24 +370,34 @@ export default function CreateRequestForm() {
           />
         </Field>
 
-        <Field label="Link expires">
-          <div className="flex flex-wrap gap-2">
-            {EXPIRY_PRESETS.map((preset, index) => (
-              <button
-                key={preset.label}
-                type="button"
-                onClick={() => setExpiryIndex(index)}
-                className={`rounded-lg border px-3 py-1.5 text-xs transition ${
-                  index === expiryIndex
-                    ? "border-accent bg-accent-soft text-foreground"
-                    : "border-hairline text-muted hover:bg-surface-raised"
-                }`}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-        </Field>
+        {recurring ? (
+          <Field label="Link expires">
+            <p className="text-xs leading-relaxed text-muted">
+              {installmentsValid && installmentCount !== null
+                ? `When the last of the ${installmentCount} payments is done — a recurring link has to outlive its schedule.`
+                : "Never, while it has no end date. Stop sharing it to end the subscription."}
+            </p>
+          </Field>
+        ) : (
+          <Field label="Link expires">
+            <div className="flex flex-wrap gap-2">
+              {EXPIRY_PRESETS.map((preset, index) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => setExpiryIndex(index)}
+                  className={`rounded-lg border px-3 py-1.5 text-xs transition ${
+                    index === expiryIndex
+                      ? "border-accent bg-accent-soft text-foreground"
+                      : "border-hairline text-muted hover:bg-surface-raised"
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </Field>
+        )}
       </div>
 
       {error ? <p className="mt-5 text-sm text-red-400">{error}</p> : null}
@@ -299,7 +407,11 @@ export default function CreateRequestForm() {
         disabled={submitting}
         className="mt-6 w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-[#14101f] transition hover:brightness-110 disabled:opacity-50"
       >
-        {submitting ? "Creating…" : "Create payment link"}
+        {submitting
+          ? "Creating…"
+          : recurring
+            ? "Create recurring link"
+            : "Create payment link"}
       </button>
     </form>
   );

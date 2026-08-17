@@ -36,6 +36,10 @@ export default async function PayPage({ params }: PageProps<"/pay/[id]">) {
       memo: request.memo,
       createdAt: request.createdAt,
       expiresAt: request.expiresAt,
+      // Which installment is due depends on the clock, so it's worked out in
+      // the browser after mount — the server's `now` and the payer's would
+      // disagree and break hydration.
+      schedule: request.schedule,
     };
 
     // Confirm the label still points where it did when the link was made. Done

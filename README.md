@@ -37,12 +37,12 @@ Following [Private Sprint (STRK20)](https://strk20.starknet.io/hackathon), Aug 1
 * ✅ **M1:** payment request object + shareable link + shield-to-pay flow
 * ✅ **M2:** paid-detection + private balance dashboard (viewing key)
 * ✅ **M3:** unshield ("withdraw to spend") + pay-by-identifier lookup (Starknet ID)
-* **M4:** recurring payment requests (subscriptions / repeat invoices)
+* ✅ **M4:** recurring payment requests (subscriptions / repeat invoices)
 * **M5:** stretch — public status page per link (paid / pending) without revealing amount or parties
 
 ## Status
 
-M1–M3 are built and running against mainnet infrastructure. Still to do: the
+M1–M4 are built and running against mainnet infrastructure. Still to do: the
 three real pool transactions for `strk20.json`, a demo video, and a public
 deployment — see [Getting to mainnet](#getting-to-mainnet).
 
@@ -82,6 +82,27 @@ detects this and offers to round the deposit up; the surplus stays shielded.
 
 [**docs/PRIVACY.md**](docs/PRIVACY.md) has the full accounting of what is and
 isn't hidden, and why "submitted" and "received" are separate states.
+
+### Recurring requests
+
+A link can repeat — weekly, fortnightly, monthly, with an end after *n* payments
+or none at all. One link covers the whole subscription: each period it presents
+that period's installment, and the payer approves it in their wallet.
+
+It can't be otherwise. Every private transfer is a proof generated inside the
+payer's wallet, so a link that charged on its own would need their key sitting on
+a server. Nothing here does. "Cancelling" is just not paying the next one — the
+recipient's side of it is to stop sharing the link.
+
+Each installment carries its own status, so the dashboard shows the period
+that's currently due rather than the first one ever paid, and a payer reopening
+the link is told if this period already looks settled. Months are calendar
+months: the 31st bills on the 28th in February and back on the 31st in March,
+without drifting ([`src/lib/request/schedule.ts`](src/lib/request/schedule.ts)).
+
+Repetition has a privacy cost of its own — a shield-per-payment cadence is a
+strong fingerprint even when every transfer stays hidden. `docs/PRIVACY.md`
+covers it and what to do instead.
 
 ### Getting to mainnet
 

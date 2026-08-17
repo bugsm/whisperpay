@@ -71,6 +71,33 @@ followed immediately by a transfer still narrows the amount to "at most 20". The
 strongest privacy comes from shielding **ahead of time, in an unremarkable
 amount, unlinked in time from any payment** — which Route 1 then uses.
 
+## Recurring requests
+
+A recurring link asks for the same amount every period. It is **not** a standing
+authorisation, and the difference is structural rather than a policy choice:
+every private transfer is a zero-knowledge proof generated inside the payer's
+wallet, so nothing can charge them without their wallet approving it. There is
+no key on a server, no cron job, and no way for a recipient to pull funds. The
+schedule rides in the link like everything else, so the server still holds no
+list of subscriptions.
+
+The repetition itself carries a privacy cost, and it lands on Route 2. A payer
+who shields per payment publishes *the same amount, from the same address, at a
+regular interval* — a much stronger fingerprint than any single deposit. An
+observer who spots the cadence can infer an ongoing relationship and its size,
+even though every transfer stays hidden.
+
+Route 1 has no such pattern. So for anything that repeats, shield once, in an
+amount that covers several periods, unlinked in time from any payment — each
+installment is then a pure note-to-note transfer and the schedule leaves no
+public trace at all. Rounding the deposit up helps a single payment; it does not
+break a cadence.
+
+Status is tracked per installment (`<id>.<n>`), because one period being paid
+says nothing about the next. That means one small record per period instead of
+one per request — same fields, no amounts and no addresses, but the count of
+records does reveal how many periods have been reported to a configured store.
+
 ## Withdrawals
 
 Unshielding is public: the destination address and the amount are visible.

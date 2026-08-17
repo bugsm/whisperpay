@@ -14,8 +14,13 @@ import { isValidTxHash, verifyPoolTransaction } from "@/lib/strk20/verify";
  * GET  → the current record, or `pending` when nothing has been recorded.
  * POST → `{ txHash }` to report a submitted payment (verified on-chain first),
  *        or `{ action: "confirm" }` for the recipient to confirm receipt.
+ *
+ * A recurring request tracks each installment separately, under `<id>.<index>`
+ * (`installmentStatusId`), since one month being paid says nothing about the
+ * next. The id itself is base64url and never contains a dot, so the suffix is
+ * unambiguous.
  */
-const ID_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,32}(?:\.\d{1,3})?$/;
 
 export async function GET(
   _request: NextRequest,
