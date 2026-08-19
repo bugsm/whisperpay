@@ -71,3 +71,14 @@ export function ceilToMultiple(value: bigint, step: bigint): bigint {
   const remainder = value % step;
   return remainder === 0n ? value : value + (step - remainder);
 }
+
+/**
+ * How many decimal places an amount actually uses, ignoring trailing zeros.
+ *
+ * Used to spot amounts distinctive enough to act as their own identifier —
+ * `12.4173829` is memorable in a way `12.5` isn't. See `assessPrivacy`.
+ */
+export function significantDecimals(value: bigint, decimals: number): number {
+  const fraction = formatUnits(value, decimals).split(".")[1];
+  return fraction ? fraction.length : 0;
+}

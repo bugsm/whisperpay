@@ -23,6 +23,7 @@ import {
 } from "@/lib/strk20/constants";
 import { describeStrk20Error, type Strk20Failure } from "@/lib/strk20/errors";
 import { planPayment } from "@/lib/strk20/plan";
+import { assessPrivacy, type PrivacyLevel } from "@/lib/strk20/privacy";
 import { mainnetProvider } from "@/lib/strk20/provider";
 
 /** Serializable form of a PaymentRequest — `amount` crosses as a string. */
@@ -413,6 +414,8 @@ function PlanView({
         ) : null}
       </dl>
 
+      <PrivacyMeter plan={plan} token={token} />
+
       {shielding ? (
         <div className="mt-4 rounded-xl border border-hairline bg-background p-4">
           <p className="text-xs leading-relaxed text-muted">
@@ -483,6 +486,86 @@ function PlanView({
     </>
   );
 }
+
+/**
+ * What this specific payment publishes, shown before the payer commits.
+ *
+ * Every word of it comes from the plan `planPayment` already built for these
+ * exact numbers — the route it chose, the deposit it sized, whether that
+ * deposit gives the amount away. A payer can check the claim against the
+ * figures in the table directly above it, which is the point: a privacy notice
+ * that reads the same regardless of what's about to happen teaches nobody
+ * anything.
+ */
+function PrivacyMeter({
+  plan,
+  token,
+}: {
+  plan: NonNullable<ReturnType<typeof planPayment>>;
+  token: NonNullable<ReturnType<typeof findToken>>;
+}) {
+  const assessment = assessPrivacy(plan, token);
+  const style = LEVEL_STYLE[assessment.level];
+
+  return (
+    <div className={`mt-4 rounded-xl border p-4 ${style.container}`}>
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-medium tracking-wide text-muted uppercase">
+          On-chain privacy
+        </span>
+        <span className={`ml-auto text-xs font-semibold ${style.text}`}>
+          {assessment.label}
+        </span>
+      </div>
+
+      <div className="mt-2.5 flex gap-1" aria-hidden>
+        {[0, 1, 2].map((segment) => (
+          <span
+            key={segment}
+            className={`h-1.5 flex-1 rounded-full ${
+              segment < style.filled ? style.bar : "bg-[var(--hairline)]"
+            }`}
+          />
+        ))}
+      </div>
+
+      <p className="mt-3 text-xs leading-relaxed text-muted">
+        {assessment.detail}
+      </p>
+
+      {assessment.fingerprintNote ? (
+        <p className="mt-2.5 border-t border-hairline pt-2.5 text-xs leading-relaxed text-amber-200/80">
+          {assessment.fingerprintNote}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Three segments, filled to match the level. */
+const LEVEL_STYLE: Record<
+  PrivacyLevel,
+  { container: string; text: string; bar: string; filled: number }
+> = {
+  strong: {
+    container: "border-emerald-400/30 bg-emerald-400/5",
+    text: "text-emerald-300",
+    bar: "bg-emerald-400",
+    filled: 3,
+  },
+  moderate: {
+    container: "border-hairline bg-background",
+    text: "text-accent",
+    bar: "bg-accent",
+    filled: 2,
+  },
+  weak: {
+    container: "border-amber-400/30 bg-amber-400/5",
+    text: "text-amber-300",
+    bar: "bg-amber-400",
+    filled: 1,
+  },
+};
 
 function PaidCard({
   txHash,
