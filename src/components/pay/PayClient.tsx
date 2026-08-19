@@ -308,7 +308,7 @@ export default function PayClient({
             </>
           ) : request.expiresAt ? (
             <Row label={expired ? "Expired" : "Expires"}>
-              {new Date(request.expiresAt * 1000).toLocaleString()}
+              {formatDateTime(request.expiresAt)}
             </Row>
           ) : null}
         </dl>
@@ -873,13 +873,38 @@ function WalletLinks() {
   );
 }
 
-/** Dates only ever render after mount, so the payer's own locale is safe here. */
+/**
+ * Installment dates, which only ever render after mount — `currentInstallment`
+ * reads the clock, so nothing here reaches the server. The payer's own locale
+ * is safe for exactly that reason.
+ */
 function formatDate(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleDateString(undefined, {
     day: "numeric",
     month: "short",
     year: "numeric",
   });
+}
+
+/**
+ * An expiry, which *is* server-rendered — the deadline comes out of the link,
+ * not the clock, so there's nothing to defer past hydration.
+ *
+ * That rules out the payer's locale: the server has its own, and the two
+ * disagreeing is a hydration mismatch (`8/27/2026, 1:51:29 AM` against
+ * `27/08/2026, 01.51.29`). One fixed locale, and UTC said out loud, so a
+ * deadline is never read as local time when it isn't.
+ */
+function formatDateTime(unixSeconds: number): string {
+  const formatted = new Date(unixSeconds * 1000).toLocaleString("en-GB", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${formatted} UTC`;
 }
 
 function Card({ children }: { children: React.ReactNode }) {
