@@ -2,6 +2,31 @@
 
 One-link private payment requests on Starknet, powered by STRK20 shielded transfers.
 
+## Innovation
+
+Whisper Pay routes each payment by reading the payer's shielded balance first —
+funded payers pay note-to-note with nothing public, first-time payers get
+deposit and transfer bundled atomically. When that deposit would equal the
+payment and publish it, the router flags it and offers to over-fund so the
+public leg no longer states what was paid.
+
+That decision is made in [`planPayment`](src/lib/strk20/plan.ts) and shown to
+the payer before they sign, as a privacy meter that quotes this transaction's
+own numbers rather than a generic disclaimer
+([`assessPrivacy`](src/lib/strk20/privacy.ts)). Both are covered by tests —
+`npm test`.
+
+Two honest limits, stated here because they're easy to overclaim:
+
+- **Over-funding is offered, not forced.** It rounds the deposit up to the next
+  10 STRK, deterministically — not randomly — and the payer chooses. When the
+  amount is already a multiple of 10 the rounding changes nothing, and the app
+  keeps the warning up rather than pretending otherwise.
+- **It narrows, it doesn't erase.** A 20 STRK deposit followed by a transfer
+  still bounds the payment at "at most 20". Shielding ahead of time, unlinked in
+  time from any payment, is the only route that publishes nothing at all — and
+  it's the route the app takes whenever the payer is already funded.
+
 ## What is this?
 
 Whisper Pay is a one-link private payment request tool built on STRK20. A user generates a shareable payment link (similar to PayPal.me); when the payer clicks and pays through the link, the transfer is routed through STRK20's shielded flow so the amount and sender/receiver details stay private on-chain, while the recipient can still view their own incoming payments.
@@ -19,10 +44,16 @@ On a public chain, every payment link normally leaks the full picture: who paid,
 
 ## Stack
 
-- **Frontend & Backend:** Next.js
-- **Chain interaction:** Starknet.js
-- **Privacy layer:** STRK20 wallet API / SDK for the shielding flow
-- **Identity:** Starknet ID, so a request can be addressed to `alice.stark`
+Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · starknet.js v10 ·
+get-starknet (Wallet Standard) · STRK20 Privacy Wallet API · Starknet ID ·
+Zustand · Upstash KV (optional)
+
+**No custom Cairo contracts, nothing deployed.** Every pool operation — deposit,
+transfer, withdraw — is composed as STRK20 actions and submitted through the
+user's wallet via `strk20InvokeTransaction`. Starknet ID resolution calls the
+mainnet naming contract read-only through the app's own RPC. The only optional
+server dependency is a KV store for request status, and payment works without
+it.
 
 ## Goal for the sprint
 
@@ -51,6 +82,7 @@ deployment — see [Getting to mainnet](#getting-to-mainnet).
 ```bash
 npm install
 npm run dev          # http://localhost:3000
+npm test             # routing and privacy-claim tests, no extra dependencies
 ```
 
 No configuration needed — it defaults to a public mainnet RPC. Copy
@@ -79,6 +111,16 @@ settle together or not at all.
 When the deposit would exactly equal the payment — the zero-balance case — the
 amount is effectively published and linked to the transfer by timing. The app
 detects this and offers to round the deposit up; the surplus stays shielded.
+
+Whichever route applies, the payer sees it before they sign. A privacy meter on
+the payment page states what *this* transaction publishes, quoting its own
+numbers — "the deposit is rounded up to 20 STRK, so the public leg says 20 STRK
+shielded, not what you paid" — so the claim can be checked against the figures
+directly above it. It also flags an amount precise enough to identify itself
+(seven decimal places is memorable in a way 12.5 isn't), as advice rather than a
+blocker. The wording comes from
+[`assessPrivacy`](src/lib/strk20/privacy.ts), which adds no routing logic of its
+own — every branch reads a decision `planPayment` already made.
 
 [**docs/PRIVACY.md**](docs/PRIVACY.md) has the full accounting of what is and
 isn't hidden, and why "submitted" and "received" are separate states.
