@@ -13,7 +13,7 @@
 import { CallData } from "starknet";
 
 import { mainnetProvider } from "@/lib/strk20/provider";
-import { normalizeAddress } from "@/lib/strk20/constants";
+import { normalizeAddress, sameAddress } from "@/lib/strk20/constants";
 import { decodeDomain, encodeDomain, isStarkDomain } from "./encoding";
 
 export { isStarkDomain, MAX_NAME_LENGTH } from "./encoding";
@@ -99,7 +99,7 @@ export async function verifyNameStillResolves(
     return { state: "unchecked", name };
   }
 
-  if (actual && normalizeAddress(actual) === normalizeAddress(expectedAddress)) {
+  if (actual && sameAddress(actual, expectedAddress)) {
     return { state: "match", name, address: normalizeAddress(expectedAddress) };
   }
   return {

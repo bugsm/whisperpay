@@ -1,5 +1,5 @@
 import { mainnetProvider } from "./provider";
-import { POOL_ADDRESS, normalizeAddress } from "./constants";
+import { POOL_ADDRESS, sameAddress } from "./constants";
 
 /**
  * Verifying that a reported transaction really touched the STRK20 pool.
@@ -67,16 +67,9 @@ export async function verifyPoolTransaction(
   const events = Array.isArray(receipt.events)
     ? (receipt.events as { from_address?: string }[])
     : [];
-  const pool = normalizeAddress(POOL_ADDRESS);
-  const poolEventCount = events.filter((event) => {
-    try {
-      return event.from_address
-        ? normalizeAddress(event.from_address) === pool
-        : false;
-    } catch {
-      return false;
-    }
-  }).length;
+  const poolEventCount = events.filter((event) =>
+    event.from_address ? sameAddress(event.from_address, POOL_ADDRESS) : false
+  ).length;
 
   if (poolEventCount === 0) {
     return {

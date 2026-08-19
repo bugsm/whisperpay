@@ -66,7 +66,13 @@ function isEntry(value: unknown): value is HistoryEntry {
     typeof entry.id === "string" &&
     typeof entry.path === "string" &&
     typeof entry.recipient === "string" &&
-    typeof entry.amount === "string"
+    typeof entry.amount === "string" &&
+    // Required, because `loadHistory` deletes what it considers stale and an
+    // entry with no readable date reads as infinitely old. Without this check a
+    // single missing field silently destroys a request the user still needs.
+    typeof entry.createdAt === "number" &&
+    Number.isFinite(entry.createdAt) &&
+    entry.createdAt > 0
   );
 }
 
@@ -77,20 +83,24 @@ export function loadHistory(): HistoryEntry[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    const kept = parsed.filter(isEntry);
-    const fresh = kept.filter((entry) => !isStale(entry));
-
-    // Written back so pruning is real rather than cosmetic: an entry that has
-    // aged out should stop existing, not just stop being listed.
-    if (fresh.length !== kept.length) {
+    // Deleting and hiding are separate decisions, deliberately.
+    //
+    // Only something readable *and* provably past its date gets removed from
+    // storage; anything this version can't parse is left where it is. The
+    // conservative direction matters because the write-back is destructive and
+    // a request the user still needs has no other copy — an entry that merely
+    // looks odd to today's validator must not be answered with deletion.
+    const survivors = parsed.filter((value) => !(isEntry(value) && isStale(value)));
+    if (survivors.length !== parsed.length) {
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(survivors));
       } catch {
         /* a read-only store still gets the filtered list below */
       }
     }
 
-    return fresh
+    return survivors
+      .filter(isEntry)
       // A malformed schedule would render as "Invalid Date" forever; the rest
       // of the entry is still useful, so drop just the schedule.
       .map((entry) =>

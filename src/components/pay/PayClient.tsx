@@ -19,6 +19,7 @@ import { isExpired, type RequestStatus } from "@/lib/request/types";
 import {
   findToken,
   normalizeAddress,
+  sameAddress,
   MAINNET_CHAIN_ID,
   PRIVACY_WALLETS,
   VOYAGER_TX_URL,
@@ -662,8 +663,7 @@ function AdoptRequest({
   }, [request.id]);
 
   const addressed =
-    connectedAddress !== "" &&
-    normalizeAddress(connectedAddress) === normalizeAddress(request.recipient);
+    connectedAddress !== "" && sameAddress(connectedAddress, request.recipient);
 
   if (!addressed || known !== false) return null;
 

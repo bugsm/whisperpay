@@ -66,19 +66,50 @@ export const TOKENS: Record<string, TokenInfo> = {
 
 export const DEFAULT_TOKEN = STRK;
 
-/** Look up a token by address, tolerating unpadded hex. */
+/** Look up a token by address, padded or not. */
 export function findToken(address: string): TokenInfo | undefined {
-  const target = normalizeAddress(address);
-  return Object.values(TOKENS).find((t) => normalizeAddress(t.address) === target);
+  return Object.values(TOKENS).find((token) =>
+    sameAddress(token.address, address)
+  );
 }
 
 /**
- * Canonical lowercase hex form of a Starknet address, with leading zeros in the
- * body stripped. Used for comparisons only — never for display or calldata.
+ * The app's canonical form for a Starknet address: lowercase hex, leading zeros
+ * in the body stripped.
+ *
+ * Starknet addresses are field elements, so the same account arrives spelled
+ * differently depending on where the value came from — `validateAndParseAddress`
+ * and most wallets pad to 64 hex digits, a link or an event log usually
+ * doesn't. `0x0116…be41` and `0x116…be41` are one account.
+ *
+ * Everything the app stores, compares or displays goes through here, including
+ * addresses arriving from a wallet — see `walletStore`. One form throughout is
+ * what keeps a padded copy from ever being held up against an unpadded one.
  */
 export function normalizeAddress(address: string): string {
   const hex = address.trim().toLowerCase().replace(/^0x/, "").replace(/^0+/, "");
   return `0x${hex || "0"}`;
+}
+
+/**
+ * Whether two addresses are the same account.
+ *
+ * Compares the numbers, not the strings, so no amount of padding, casing or
+ * whitespace can make one account look like two. Anything unparseable is not
+ * equal to anything, including itself — a malformed address is not a match, and
+ * silently treating it as one is how a signing gate lets the wrong key through.
+ *
+ * Use this rather than `===` on any two addresses, even normalized ones. The
+ * name says what the comparison means; `===` on strings only says they were
+ * spelled alike.
+ */
+export function sameAddress(a: string, b: string): boolean {
+  // Both sides are validated first, and not only to avoid a throw: `BigInt("")`
+  // is `0n`, so a bare numeric comparison quietly rules that two blank
+  // addresses are the same account — which is what a signing gate sees when no
+  // wallet is connected at all.
+  if (!isValidAddress(a) || !isValidAddress(b)) return false;
+  return BigInt(a.trim()) === BigInt(b.trim());
 }
 
 /**

@@ -69,7 +69,12 @@ export const useWallet = create<WalletState>()((set, get) => ({
       if (!Array.isArray(accounts) || accounts.length === 0) {
         throw new Error("Wallet returned no accounts.");
       }
-      const address = validateAndParseAddress(accounts[0]);
+      // `validateAndParseAddress` rejects nonsense and pads to 64 hex digits;
+      // the padding is then dropped so the address matches the form the rest of
+      // the app stores and displays. Canonicalising here, at the boundary,
+      // rather than at each comparison is what stops a padded copy of an
+      // account from ever being held up against an unpadded one.
+      const address = normalizeAddress(validateAndParseAddress(accounts[0]));
       const chainId = (await walletV6.requestChainId(wallet)) as string;
 
       unsubscribe?.();
@@ -82,8 +87,10 @@ export const useWallet = create<WalletState>()((set, get) => ({
               walletV6.requestAccounts(wallet),
               walletV6.requestChainId(wallet),
             ]);
+            // Same canonical form as on connect — an account switch must not
+            // change how the same account is spelled.
             const nextAddress = Array.isArray(nextAccounts) && nextAccounts[0]
-              ? validateAndParseAddress(nextAccounts[0])
+              ? normalizeAddress(validateAndParseAddress(nextAccounts[0]))
               : "";
             set({
               address: nextAddress,

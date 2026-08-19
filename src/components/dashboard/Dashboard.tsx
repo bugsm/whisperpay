@@ -32,6 +32,7 @@ import {
   PRIVACY_WALLETS,
   VOYAGER_TX_URL,
   normalizeAddress,
+  sameAddress,
 } from "@/lib/strk20/constants";
 import { describeStrk20Error } from "@/lib/strk20/errors";
 import { planUnshield } from "@/lib/strk20/plan";
@@ -462,7 +463,8 @@ function RequestList() {
       );
       return;
     }
-    if (normalizeAddress(address) !== normalizeAddress(entry.recipient)) {
+    // Padded or not, one account is one account — see `sameAddress`.
+    if (!sameAddress(address, entry.recipient)) {
       setReceiptError(
         `This request was addressed to ${shortAddress(entry.recipient)}, but you're connected as ${shortAddress(address)}. Switch to that account to sign for it.`
       );
