@@ -17,6 +17,14 @@ import {
   describePeriod,
   installmentStatusId,
 } from "@/lib/request/schedule";
+import {
+  RECEIPT_CLAIM,
+  RECEIPT_VERSION,
+  receiptToJson,
+  receiptTypedData,
+  verifyPath,
+  type Receipt,
+} from "@/lib/request/receipt";
 import type { RequestStatus } from "@/lib/request/types";
 import {
   DEFAULT_TOKEN,
@@ -347,6 +355,10 @@ const STATUS_POLL_MS = 15_000;
 function RequestList() {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [statuses, setStatuses] = useState<Record<string, RequestStatus>>({});
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
+  const [signing, setSigning] = useState<string | null>(null);
+  const { account, address } = useWallet();
 
   // History lives in localStorage, which only exists after mount — reading it
   // during render would differ between server and client.
@@ -432,6 +444,55 @@ function RequestList() {
     }
   }
 
+  /**
+   * Signing a receipt for a request that was paid.
+   *
+   * The signature has to come from the account the request was addressed to —
+   * that's the entire content of the claim, so no other account can stand in.
+   * Nothing is sent anywhere: the artifact is assembled here and handed to the
+   * recipient to pass on as they see fit.
+   */
+  async function generateReceipt(entry: HistoryEntry) {
+    setReceipt(null);
+    setReceiptError(null);
+
+    if (!account || !address) {
+      setReceiptError(
+        "Connect the wallet this request was addressed to — a receipt is its signature, so nothing else can produce one."
+      );
+      return;
+    }
+    if (normalizeAddress(address) !== normalizeAddress(entry.recipient)) {
+      setReceiptError(
+        `This request was addressed to ${shortAddress(entry.recipient)}, but you're connected as ${shortAddress(address)}. Switch to that account to sign for it.`
+      );
+      return;
+    }
+
+    const request = statusKeyFor(entry);
+    const issuedAt = Math.floor(Date.now() / 1000);
+    setSigning(entry.id);
+
+    try {
+      const signature = await account.signMessage(
+        receiptTypedData(request, issuedAt)
+      );
+      setReceipt({
+        version: RECEIPT_VERSION,
+        request,
+        claim: RECEIPT_CLAIM,
+        issuedAt,
+        recipient: address,
+        signature: toParts(signature),
+      });
+    } catch {
+      // Declining in the wallet lands here, and needs no explaining.
+      setReceiptError(null);
+    } finally {
+      setSigning(null);
+    }
+  }
+
   if (entries.length === 0) {
     return (
       <section className="rounded-2xl border border-hairline bg-surface p-6">
@@ -510,6 +571,17 @@ function RequestList() {
                 >
                   Status
                 </button>
+                {status === "confirmed" ? (
+                  <button
+                    type="button"
+                    title="Sign a receipt saying this request was paid"
+                    onClick={() => void generateReceipt(entry)}
+                    disabled={signing === entry.id}
+                    className="rounded-lg border border-hairline px-2 py-1 text-xs transition hover:bg-surface-raised disabled:opacity-50"
+                  >
+                    {signing === entry.id ? "Signing…" : "Receipt"}
+                  </button>
+                ) : null}
                 {status === "pending" ? (
                   <button
                     type="button"
@@ -537,6 +609,14 @@ function RequestList() {
         })}
       </ul>
 
+      {receiptError ? (
+        <p className="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/5 p-3 text-xs leading-relaxed text-amber-200/80">
+          {receiptError}
+        </p>
+      ) : null}
+
+      {receipt ? <ReceiptPanel receipt={receipt} onClose={() => setReceipt(null)} /> : null}
+
       <p className="mt-4 border-t border-hairline pt-4 text-xs leading-relaxed text-muted">
         <strong className="font-medium text-foreground">
           What "received" means:
@@ -556,6 +636,124 @@ function RequestList() {
         </p>
       ) : null}
     </section>
+  );
+}
+
+/** Wallet signatures come back as felts or as an r/s pair; store felts. */
+function toParts(signature: unknown): string[] {
+  if (Array.isArray(signature)) return signature.map((part) => String(part));
+  if (typeof signature === "object" && signature !== null) {
+    const { r, s } = signature as { r?: unknown; s?: unknown };
+    if (r !== undefined && s !== undefined) {
+      return [r, s].map((value) => `0x${BigInt(String(value)).toString(16)}`);
+    }
+  }
+  return [];
+}
+
+function shortAddress(address: string): string {
+  return address.length <= 13
+    ? address
+    : `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+/**
+ * The signed receipt, ready to hand over.
+ *
+ * Offered as a file and as a link because the two audiences differ: an
+ * accountant wants something to keep, a client wants something to click. Both
+ * carry the identical signed payload — the link is just the JSON, encoded into
+ * the URL, so checking it needs no server holding a copy.
+ */
+function ReceiptPanel({
+  receipt,
+  onClose,
+}: {
+  receipt: Receipt;
+  onClose: () => void;
+}) {
+  const json = receiptToJson(receipt);
+
+  function download() {
+    const url = URL.createObjectURL(
+      new Blob([json], { type: "application/json" })
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `whisperpay-receipt-${receipt.request}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-hairline bg-surface-raised/40 p-4">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">Receipt signed</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted">
+            You've asserted "{RECEIPT_CLAIM}" for request{" "}
+            <span className="font-mono">{receipt.request}</span>, and signed it
+            with this account. Anyone can check that signature without asking
+            us. It says nothing about the amount, which isn't in the signed
+            message, and nothing about who paid, which nobody can know.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          title="Dismiss"
+          className="shrink-0 rounded-lg border border-hairline px-2 py-1 text-xs text-muted transition hover:bg-surface-raised"
+        >
+          ×
+        </button>
+      </div>
+
+      <pre className="mt-3 max-h-48 overflow-auto rounded-lg border border-hairline bg-surface p-3 font-mono text-[11px] leading-relaxed">
+        {json}
+      </pre>
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={download}
+          className="rounded-lg border border-hairline px-2.5 py-1 text-xs transition hover:bg-surface-raised"
+        >
+          Download JSON
+        </button>
+        <button
+          type="button"
+          onClick={() => void navigator.clipboard.writeText(json)}
+          className="rounded-lg border border-hairline px-2.5 py-1 text-xs transition hover:bg-surface-raised"
+        >
+          Copy JSON
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            void navigator.clipboard.writeText(
+              `${window.location.origin}${verifyPath(receipt)}`
+            )
+          }
+          className="rounded-lg border border-hairline px-2.5 py-1 text-xs transition hover:bg-surface-raised"
+        >
+          Copy verify link
+        </button>
+        <Link
+          href={verifyPath(receipt)}
+          className="rounded-lg border border-hairline px-2.5 py-1 text-xs text-muted transition hover:bg-surface-raised hover:text-foreground"
+        >
+          Check it yourself ↗
+        </Link>
+      </div>
+
+      <p className="mt-3 text-xs leading-relaxed text-muted">
+        A receipt is your word, signed — the same standing as a signed paper
+        receipt, not a cryptographic proof that money moved. It's for showing an
+        accountant or a client that a request was fulfilled; it carries no
+        weight in a dispute about whether you were paid, since you're the one
+        signing it.
+      </p>
+    </div>
   );
 }
 

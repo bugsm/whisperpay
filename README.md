@@ -70,11 +70,53 @@ Following [Private Sprint (STRK20)](https://strk20.starknet.io/hackathon), Aug 1
 * ✅ **M3:** unshield ("withdraw to spend") + pay-by-identifier lookup (Starknet ID)
 * ✅ **M4:** recurring payment requests (subscriptions / repeat invoices)
 * ✅ **M5:** stretch — public status page per link (paid / pending) without revealing amount or parties
+* ✅ **M6:** stretch — [signed receipts](#signed-receipts) the recipient issues and anyone can check
+
+## Signed receipts
+
+A recipient can hand someone a receipt: "request X was paid", signed by the
+account the request was addressed to. Generate one from the dashboard on a paid
+request; anyone can check it at `/verify-receipt`, from their own browser,
+against the account contract on mainnet. No Whisper Pay server is consulted, and
+none could change the answer.
+
+**It is a signed receipt, not a proof of payment.** What a verifier learns is
+that whoever holds that account's key asserted a specific sentence about a
+specific request id, at a specific time, and cannot later deny doing so. That is
+the trust model of a signed paper receipt — non-repudiable, and worth exactly
+what the signer's word is worth.
+
+It is **not** a zero-knowledge proof and must never be described as one. Proving
+"a transfer of at least X reached my address" without revealing X means proving
+statements about the pool's note commitments, which needs a custom Cairo
+circuit, a verifier contract and prover integration. Whisper Pay is wallet-only
+and never touches note internals or the viewing key, so that claim isn't ours to
+make.
+
+Two limits are built into the format rather than only written here:
+
+* **It cannot name the payer.** The pool hides the sender from everyone, the
+  recipient included. A receipt says "request X was paid"; it can never say who
+  paid it, and no field carries a payer.
+* **The amount is deliberately excluded from the signed payload.** Not hidden
+  from display — absent from what gets signed, so a receipt cannot be made to
+  imply an amount, and `receipt.test.ts` fails if a field ever sneaks in.
+
+And a limit no format can fix: **this is for cooperative use only.** Showing an
+accountant or a client that a request was fulfilled is the use case. It is
+useless in an adversarial dispute, because the recipient is the party being
+disputed and simply won't sign a receipt that hurts their case. The verification
+page says so to whoever is reading a receipt, not just here.
+
+Mechanically: SNIP-12 revision 1 typed data signed through `wallet_signTypedData`,
+verified with `verifyMessageInStarknet`, which calls `is_valid_signature` on the
+signer's account contract — so any account implementation works, not only
+plain Stark-curve keys.
 
 ## Status
 
-M1–M5 are built and running against mainnet infrastructure. Still to do: the
-three real pool transactions for `strk20.json`, a demo video, and a public
+M1–M6 are built and running against mainnet infrastructure. `strk20.json` holds
+three verified mainnet pool transactions. Still to do: a demo video and a public
 deployment — see [Getting to mainnet](#getting-to-mainnet).
 
 ## Run it
