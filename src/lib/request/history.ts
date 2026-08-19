@@ -10,9 +10,34 @@
  * trade for this app.
  */
 
-import { isValidSchedule, type Schedule } from "./schedule";
+import { currentInstallment, isValidSchedule, type Schedule } from "./schedule";
 
 const STORAGE_KEY = "whisperpay.requests.v1";
+
+/**
+ * How long a request stays in this browser.
+ *
+ * Short on purpose: the list is the only place a record of who you billed
+ * exists, so it shouldn't outlive its usefulness by months. A live subscription
+ * is the exception — it's meant to be reopened every period, and quietly
+ * dropping it on day seven would break the thing it's for.
+ */
+const MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+
+function isStale(
+  entry: HistoryEntry,
+  now: number = Math.floor(Date.now() / 1000)
+): boolean {
+  if (now - entry.createdAt < MAX_AGE_SECONDS) return false;
+  if (
+    entry.schedule &&
+    isValidSchedule(entry.schedule) &&
+    !currentInstallment(entry.schedule, now).ended
+  ) {
+    return false;
+  }
+  return true;
+}
 
 /** Plenty for a demo or a freelancer's month; keeps localStorage small. */
 const MAX_ENTRIES = 200;
@@ -52,8 +77,20 @@ export function loadHistory(): HistoryEntry[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(isEntry)
+    const kept = parsed.filter(isEntry);
+    const fresh = kept.filter((entry) => !isStale(entry));
+
+    // Written back so pruning is real rather than cosmetic: an entry that has
+    // aged out should stop existing, not just stop being listed.
+    if (fresh.length !== kept.length) {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
+      } catch {
+        /* a read-only store still gets the filtered list below */
+      }
+    }
+
+    return fresh
       // A malformed schedule would render as "Invalid Date" forever; the rest
       // of the entry is still useful, so drop just the schedule.
       .map((entry) =>

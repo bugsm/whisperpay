@@ -23,8 +23,12 @@ export interface StatusStore {
 
 const KEY_PREFIX = "whisperpay:status:";
 
-/** Records are small and short-lived; 90 days is well past any link's usefulness. */
-const DEFAULT_TTL_SECONDS = 60 * 60 * 24 * 90;
+/**
+ * A status record outlives nothing. Seven days matches the window the browser
+ * keeps its own history for, so a request and its status disappear together
+ * rather than leaving a status page for an invoice nobody can produce.
+ */
+const DEFAULT_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 function parseRecord(raw: string): StatusRecord | null {
   try {
@@ -83,9 +87,24 @@ function createKvStore(baseUrl: string, token: string): StatusStore {
 /**
  * Process-local fallback. Survives navigations during a local demo and nothing
  * else — on serverless each instance gets its own map.
+ *
+ * The map hangs off `globalThis` rather than this module's scope, because
+ * "this module" isn't one thing: Next compiles route handlers and server
+ * components into separate bundles, so `/api/status/[id]` and `/s/[id]` each
+ * get their own instance of this file. A module-scoped map means the page can
+ * never see what the route wrote, and status sits at `pending` forever with
+ * everything else working — which is exactly how it fails. One map per process
+ * also survives dev-server hot reloads.
  */
+const MEMORY_KEY = Symbol.for("whisperpay.status.memory");
+
+type MemoryGlobal = typeof globalThis & {
+  [MEMORY_KEY]?: Map<string, StatusRecord>;
+};
+
 function createMemoryStore(): StatusStore {
-  const records = new Map<string, StatusRecord>();
+  const scope = globalThis as MemoryGlobal;
+  const records = (scope[MEMORY_KEY] ??= new Map<string, StatusRecord>());
   return {
     durable: false,
     async get(id) {

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import LiveStatus from "./LiveStatus";
+import RevealProof from "./RevealProof";
 import { decodeSchedule } from "@/lib/request/codec";
 import {
   currentInstallment,
@@ -19,11 +21,13 @@ import { getStatusStore } from "@/lib/store";
  * recipient and the note. This page exists to be shared instead: it's addressed
  * by the request id alone, which is 72 random bits and describes nothing.
  *
- * What a reader learns is exactly one fact per period — unpaid, submitted, or
- * received — plus the date it changed. What they don't learn is the amount, the
- * token, either party, the note, or the transaction. The transaction
- * particularly: it's never stored (`StatusRecord`), because for a payer who
- * shielded to pay, the hash leads to a public deposit with their address on it.
+ * What a reader learns is exactly one fact per period — unpaid or received —
+ * plus the date it changed. What they don't learn is the amount, the token,
+ * either party, the note, or the transaction. The transaction particularly: it
+ * is stored now, so the recipient can see proof, but it is released only
+ * against a signature from the address the request was addressed to
+ * (`proof.ts`). For a payer who shielded to pay, that hash leads to a public
+ * deposit with their address on it — so it is not part of this page.
  *
  * Dates are shown to the day and in UTC. An exact timestamp would narrow a
  * private transfer down to the handful of pool transactions in that second,
@@ -50,6 +54,10 @@ interface Period {
   number: number;
   dueAt: number;
   status: RequestStatus;
+  /** Status store key — what a reveal is addressed to. */
+  key: string;
+  /** Whether a transaction hash is on file for the recipient to unlock. */
+  hasProof: boolean;
 }
 
 export default async function StatusPage({
@@ -107,11 +115,15 @@ export default async function StatusPage({
       indices.map(async (index) => {
         const key = schedule ? installmentStatusId(id, index) : id;
         const record: StatusRecord | null = await store.get(key);
+        // Only ever a boolean past this line: the hash itself must not cross
+        // into the rendered page, where anyone holding the link would see it.
         return {
           index,
           number: index + 1,
           dueAt: schedule ? installmentDueAt(schedule, index) : 0,
           status: record?.status ?? ("pending" satisfies RequestStatus),
+          key,
+          hasProof: Boolean(record?.txHash && record.recipientCommitment),
         };
       })
     );
@@ -165,6 +177,10 @@ export default async function StatusPage({
           </dl>
         ) : null}
 
+        <LiveStatus settled={current.status === "confirmed"} />
+
+        {current.hasProof ? <RevealProof statusId={current.key} /> : null}
+
         {!store.durable ? (
           <p className="mt-5 rounded-xl border border-amber-400/30 bg-amber-400/5 p-3 text-xs leading-relaxed text-amber-200/80">
             This deployment has no status store configured, so nothing is being
@@ -208,12 +224,14 @@ export default async function StatusPage({
         </p>
         <p className="mt-3 text-sm leading-relaxed text-muted">
           <strong className="font-medium text-foreground">
-            Why "submitted" isn't "received":
+            What "received" is worth here:
           </strong>{" "}
-          a private transfer hides its amount and its parties, so a reported
-          transaction can be verified as a real pool transaction but never as
-          payment of this request. Only the recipient, reading their own shielded
-          balance, can say the money arrived.
+          the reported transaction is checked against the chain — it exists, it
+          succeeded, it touched the pool. It cannot be checked against{" "}
+          <em>this</em> request, because a private transfer hides its amount and
+          its parties. So this page reports a verified payment, not a proven
+          one; a recipient who needs certainty has their own shielded balance,
+          which nobody else can see.
         </p>
         <Link
           href="/"
@@ -235,10 +253,12 @@ const HEADLINE: Record<RequestStatus, string> = {
 
 const DETAIL: Record<RequestStatus, string> = {
   pending: "Nothing has been reported against this request yet.",
+  // Retired: kept so records written before payments settled themselves still
+  // render something true.
   submitted:
-    "A payer reported a verified pool transaction. The recipient hasn't confirmed the money landed yet.",
+    "A payer reported a transaction for this request, verified against the chain.",
   confirmed:
-    "The recipient confirmed this arrived in their shielded balance. That's the strongest confirmation there is — nobody else can see it.",
+    "A payer reported a transaction for this request, and it checks out on-chain: it exists, it succeeded, and it went through the privacy pool. What it can't show anyone is the amount or the parties — that's the pool working. The recipient can unlock the transaction itself below.",
   expired: "This request is no longer payable.",
 };
 

@@ -54,34 +54,56 @@ export interface PaymentRequest {
 /**
  * Lifecycle of a request, as far as Whisper Pay can honestly tell.
  *
- * There is a deliberate gap between `submitted` and `confirmed`. A private
- * transfer is relayed and carries no readable amount or parties, so the server
- * can verify that the payer's reported transaction exists, succeeded and
- * touched the pool — but *not* that it paid this request. Only the recipient,
- * seeing their own shielded balance, can close that gap. Hence two states.
+ * A payer's report moves a request straight to `confirmed`, on the strength of
+ * the transaction hash being verified against the chain: it exists, it
+ * succeeded, and it touched the pool.
+ *
+ * Be clear about what that does and doesn't establish. A private transfer is
+ * relayed and carries no readable amount or parties, so a verified hash proves
+ * *a* successful pool transaction, not that this request was paid. Treating it
+ * as settlement is a deliberate trade — it costs a recipient no clicks, and the
+ * proof is there to inspect — but a recipient who needs certainty still has
+ * only one source of it: their own shielded balance.
+ *
+ * `submitted` is retired and kept only so records written before this still
+ * render. Nothing writes it now.
  */
 export type RequestStatus = "pending" | "submitted" | "confirmed" | "expired";
 
 /**
  * What the server keeps about a request, and deliberately all of it.
  *
- * The payer's transaction hash is verified when it's reported and then thrown
- * away rather than stored. Keeping it would undo much of the point: for a payer
- * who had to shield first, the hash leads straight to a public deposit carrying
- * their address and the amount. Storing that against a request id would rebuild
- * the payer↔recipient link the pool exists to break — and hand it to anyone who
- * has the id, since status is readable by anyone who does.
+ * The payer's transaction hash is kept now, so the recipient can see proof
+ * rather than being asked to take a status badge on faith. That makes this the
+ * one field here that could unmask someone: for a payer who had to shield
+ * first, the hash leads straight to a public deposit carrying their address and
+ * the amount, and status records are readable by anyone holding the id.
  *
- * So the record is a lifecycle state and two timestamps. Nothing here
- * identifies a party, a token, or an amount.
+ * So it is never served by `GET`. Releasing it takes a signature from the
+ * address the request was addressed to, checked against `recipientCommitment`
+ * — see `proof.ts` for how that works and what it does not protect against.
+ *
+ * Everything else is a lifecycle state and two timestamps. Nothing here names a
+ * party, a token, or an amount.
  */
 export interface StatusRecord {
   id: string;
   status: RequestStatus;
   /** Unix seconds. */
   submittedAt?: number;
-  /** Unix seconds, set when the recipient confirms receipt. */
+  /** Unix seconds, set when a verified payment was reported. */
   confirmedAt?: number;
+  /**
+   * The payer's verified transaction hash. Withheld from every read except a
+   * signed reveal by the recipient.
+   */
+  txHash?: string;
+  /**
+   * `SHA-256(id : recipientAddress)`, computed in the payer's browser — the
+   * server never sees the address it commits to. Absent on records written
+   * before proofs existed, which simply can't be revealed.
+   */
+  recipientCommitment?: string;
 }
 
 /** Longest memo we'll put in a link, to keep URLs manageable. */

@@ -11,6 +11,7 @@
 export type Strk20FailureKind =
   | "cancelled"
   | "not-registered"
+  | "recipient-not-registered"
   | "insufficient-private-balance"
   | "privacy-leak"
   | "invalid-payload"
@@ -121,6 +122,23 @@ export function describeStrk20Error(error: unknown): Strk20Failure {
 
   if (known) return { ...known, raw };
 
+  const recipient = unregisteredRecipient(raw);
+  if (recipient !== undefined) {
+    return {
+      kind: "recipient-not-registered",
+      title: "Recipient isn't registered with the pool",
+      detail:
+        `A private transfer is encrypted to the recipient's viewing key, so the ` +
+        `recipient has to publish one on-chain before anyone can pay them${
+          recipient ? ` (${shortAddress(recipient)})` : ""
+        }. They register from their own wallet's privacy section — one ` +
+        `transaction, and it needs the account deployed with gas to pay for it. ` +
+        `Nothing was sent; try again once they've registered.`,
+      benign: false,
+      raw,
+    };
+  }
+
   // Wallets commonly report a plain user rejection without a STRK20 code.
   if (/reject|declin|denied|cancel/i.test(raw)) {
     return { ...BY_CODE[113], raw };
@@ -134,4 +152,31 @@ export function describeStrk20Error(error: unknown): Strk20Failure {
     benign: false,
     raw,
   };
+}
+
+/**
+ * A private transfer is encrypted to the recipient's registered viewing key, so
+ * the wallet needs a "channel" to them before it can build the note. When the
+ * recipient has never registered with the pool there's nothing to encrypt to,
+ * and wallets report it as a plain missing-channel error rather than a STRK20
+ * code — `NOT_REGISTERED` (118) means the *payer* isn't registered, which the
+ * payment flow already checks up front.
+ *
+ * Returns the recipient address when the message names one, an empty string
+ * when the message matches but carries no address, and `undefined` when this
+ * isn't a missing-channel failure at all.
+ */
+function unregisteredRecipient(message: string): string | undefined {
+  if (!/channel/i.test(message)) return undefined;
+  if (!/missing|no |not found|unknown|unregistered|without/i.test(message)) {
+    return undefined;
+  }
+  return /(0x[0-9a-fA-F]{1,64})/.exec(message)?.[1] ?? "";
+}
+
+/** `0x1160…be41` — enough to recognise, short enough to read. */
+function shortAddress(address: string): string {
+  return address.length <= 13
+    ? address
+    : `${address.slice(0, 6)}…${address.slice(-4)}`;
 }

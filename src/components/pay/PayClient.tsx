@@ -13,6 +13,8 @@ import {
   type Installment,
   type Schedule,
 } from "@/lib/request/schedule";
+import { loadHistory, saveToHistory } from "@/lib/request/history";
+import { recipientCommitment } from "@/lib/request/proof";
 import { isExpired, type RequestStatus } from "@/lib/request/types";
 import {
   findToken,
@@ -25,6 +27,15 @@ import { describeStrk20Error, type Strk20Failure } from "@/lib/strk20/errors";
 import { planPayment } from "@/lib/strk20/plan";
 import { assessPrivacy, type PrivacyLevel } from "@/lib/strk20/privacy";
 import { mainnetProvider } from "@/lib/strk20/provider";
+
+/**
+ * Backoff for re-reporting a payment whose receipt the server couldn't read
+ * yet. Roughly a minute in total, which comfortably outlasts the gap between
+ * submitting a transaction and it appearing in a block.
+ */
+const REPORT_RETRY_DELAYS_MS = [5000, 15000, 30000];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Serializable form of a PaymentRequest — `amount` crosses as a string. */
 export interface PayRequestDto {
@@ -72,6 +83,7 @@ export default function PayClient({
   const [installment, setInstallment] = useState<Installment | null>(null);
   const [settled, setSettled] = useState<RequestStatus | null>(null);
   const [payAnyway, setPayAnyway] = useState(false);
+  const [reportFailed, setReportFailed] = useState(false);
 
   const token = findToken(request.token);
   const amount = BigInt(request.amount);
@@ -99,12 +111,16 @@ export default function PayClient({
     ? installmentStatusId(request.id, installment.index)
     : request.id;
 
-  // A repeat invoice is the one case where "has this already been paid?" is
-  // worth asking before showing a Pay button: the same URL is opened over and
-  // over, and a payer can't tell this month's ask from last month's by looking.
-  // Advisory only — the store is optional, and status can't prove payment.
+  // "Has this already been paid?", asked before showing a Pay button.
+  //
+  // A payment link is a URL: it gets bookmarked, forwarded, and opened again
+  // out of habit, and nothing about it looks different afterwards. That's true
+  // of a one-off invoice and of a subscription, where a payer also can't tell
+  // this month's ask from last month's by looking.
+  //
+  // Advisory only — the store is optional and status can't prove payment, so
+  // `SettledCard` warns and hands the payer the last word.
   useEffect(() => {
-    if (!installment) return;
     let cancelled = false;
 
     void (async () => {
@@ -176,6 +192,13 @@ export default function PayClient({
 
     setPhase({ name: "confirming", txHash });
 
+    // Reported *before* the wait below, not after it. The wait runs for up to
+    // twenty minutes, and the recipient watching the status link shouldn't have
+    // to sit through it to see "submitted" — especially since the server
+    // re-verifies the hash against the chain itself and doesn't need this page
+    // to have finished anything.
+    const firstReport = reportPayment(txHash);
+
     try {
       // Pool transactions verify a STARK proof on-chain, so the budget here is
       // generous — 400 × 3s ≈ 20 minutes before we stop waiting.
@@ -190,13 +213,47 @@ export default function PayClient({
     setPhase({ name: "paid", txHash });
     void refreshBalances();
 
-    // Best-effort status report. The payment is already done — a failure here
-    // only means the recipient's dashboard won't show it as submitted.
-    void fetch(`/api/status/${statusId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ txHash }),
-    }).catch(() => {});
+    // The early report can legitimately fail: the server verifies by reading a
+    // receipt, and a transaction submitted a second ago doesn't have one yet.
+    // So back off and try again rather than stranding the status page on a
+    // transaction whose only problem is being young. Only after all of that is
+    // the failure real enough to put in front of the payer.
+    void (async () => {
+      if (await firstReport) return;
+      for (const delay of REPORT_RETRY_DELAYS_MS) {
+        await sleep(delay);
+        if (await reportPayment(txHash)) return;
+      }
+      setReportFailed(true);
+    })();
+  }
+
+  /**
+   * Tell the status store a payment went out. Returns whether it stuck.
+   *
+   * The payment itself is already on-chain and unaffected by any of this, but a
+   * silent failure here strands the recipient on "Awaiting payment" forever
+   * with nothing to click, so the caller surfaces it instead of swallowing it.
+   *
+   * `keepalive` so a payer who closes the tab on the receipt still reports.
+   */
+  async function reportPayment(txHash: string): Promise<boolean> {
+    try {
+      // Computed here, from the address in the link, so the server learns a
+      // hash instead of a recipient. It's what later lets that recipient — and
+      // only them — read this hash back. See `proof.ts`.
+      const commitment = await recipientCommitment(statusId, request.recipient);
+
+      const response = await fetch(`/api/status/${statusId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ txHash, recipientCommitment: commitment }),
+        keepalive: true,
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
   }
 
   const amountLabel = `${formatDisplay(amount, token.decimals)} ${token.symbol}`;
@@ -272,6 +329,8 @@ export default function PayClient({
         </Notice>
       ) : null}
 
+      <AdoptRequest request={request} connectedAddress={address} />
+
       {expired ? (
         request.schedule ? (
           <Notice tone="warn" title="This subscription has finished">
@@ -289,6 +348,12 @@ export default function PayClient({
           txHash={phase.txHash}
           amountLabel={amountLabel}
           installment={installment}
+          reportFailed={reportFailed}
+          onRetryReport={() => {
+            void (async () => {
+              setReportFailed(!(await reportPayment(phase.txHash)));
+            })();
+          }}
         />
       ) : settled && !payAnyway ? (
         <SettledCard
@@ -567,14 +632,84 @@ const LEVEL_STYLE: Record<
   },
 };
 
+/**
+ * Putting a request into the dashboard of the person being paid.
+ *
+ * History is per browser, on purpose — the server keeps no list of who billed
+ * whom, so there's nothing to leak and nothing to subpoena. The cost showed up
+ * the first time someone made a link on one machine and opened their wallet on
+ * another: the request was nowhere to be found on the side that was owed money.
+ *
+ * This is the seam that fixes it without giving up the property. The payment
+ * link already carries the whole request, so a recipient who opens it with
+ * their own wallet connected can copy it into their own browser. Nothing is
+ * sent anywhere; the button only appears for the account the money is for.
+ */
+function AdoptRequest({
+  request,
+  connectedAddress,
+}: {
+  request: PayRequestDto;
+  connectedAddress: string;
+}) {
+  const [known, setKnown] = useState<boolean | null>(null);
+
+  // localStorage only exists after mount, and whether this request is already
+  // in it decides what this renders — so it can't be read during render.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setKnown(loadHistory().some((entry) => entry.id === request.id));
+  }, [request.id]);
+
+  const addressed =
+    connectedAddress !== "" &&
+    normalizeAddress(connectedAddress) === normalizeAddress(request.recipient);
+
+  if (!addressed || known !== false) return null;
+
+  return (
+    <Notice tone="info" title="This request is addressed to you">
+      You're connected as its recipient. Add it to your dashboard to track
+      whether it gets paid — it's stored in this browser only, and nothing about
+      it is sent anywhere.
+      <button
+        type="button"
+        onClick={() => {
+          saveToHistory({
+            id: request.id,
+            path: window.location.pathname,
+            url: window.location.href,
+            recipient: request.recipient,
+            recipientName: request.recipientName,
+            token: request.token,
+            amount: request.amount,
+            memo: request.memo,
+            createdAt: request.createdAt,
+            expiresAt: request.expiresAt,
+            schedule: request.schedule,
+          });
+          setKnown(true);
+        }}
+        className="mt-3 block rounded-xl border border-hairline px-4 py-2 text-sm transition hover:bg-surface-raised"
+      >
+        Add to my dashboard
+      </button>
+    </Notice>
+  );
+}
+
 function PaidCard({
   txHash,
   amountLabel,
   installment,
+  reportFailed,
+  onRetryReport,
 }: {
   txHash: string;
   amountLabel: string;
   installment: Installment | null;
+  reportFailed: boolean;
+  onRetryReport: () => void;
 }) {
   return (
     <Card>
@@ -607,6 +742,21 @@ function PaidCard({
       >
         {txHash.slice(0, 10)}…{txHash.slice(-6)} ↗
       </a>
+
+      {reportFailed ? (
+        <div className="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/5 p-3 text-xs leading-relaxed text-amber-200/80">
+          Your payment went through — this is only about the status page. It
+          couldn't be told about this transaction, so it still reads "awaiting
+          payment" for whoever is watching it.
+          <button
+            type="button"
+            onClick={onRetryReport}
+            className="mt-2 block rounded-lg border border-amber-400/30 px-3 py-1.5 transition hover:bg-amber-400/10"
+          >
+            Try telling it again
+          </button>
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -642,7 +792,9 @@ function SettledCard({
       <p className="mt-2 text-sm leading-relaxed text-muted">
         {status === "confirmed"
           ? "The recipient confirmed this one landed in their shielded balance."
-          : "Someone reported a pool transaction for this period. That's not proof of payment — a private transfer hides its amount and parties — so if it wasn't you, or you're not sure it went through, you can still pay."}
+          : `Someone reported a pool transaction for ${
+              installment ? "this period" : "this request"
+            }. That's not proof of payment — a private transfer hides its amount and parties — so if it wasn't you, or you're not sure it went through, you can still pay.`}
       </p>
       {installment?.nextDueAt ? (
         <p className="mt-2 text-sm leading-relaxed text-muted">
@@ -752,18 +904,21 @@ function Notice({
   title,
   children,
 }: {
-  tone: "warn";
+  tone: "warn" | "info";
   title: string;
   children: React.ReactNode;
 }) {
   return (
     <div
       className={`rounded-xl border p-4 ${
-        tone === "warn" ? "border-amber-400/30 bg-amber-400/5" : ""
+        tone === "warn"
+          ? "border-amber-400/30 bg-amber-400/5"
+          : "border-hairline bg-surface-raised/40"
       }`}
     >
       <p className="text-sm font-medium">{title}</p>
-      <p className="mt-1 text-xs leading-relaxed text-muted">{children}</p>
+      {/* A div rather than a p — callers put buttons inside this. */}
+      <div className="mt-1 text-xs leading-relaxed text-muted">{children}</div>
     </div>
   );
 }

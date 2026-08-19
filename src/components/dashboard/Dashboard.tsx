@@ -335,6 +335,15 @@ function statusKeyFor(entry: HistoryEntry): string {
     : entry.id;
 }
 
+/**
+ * How often the dashboard re-reads state that changes without anyone touching
+ * this page: status is written by the payer's browser, and a shielded balance
+ * moves when a transfer lands.
+ *
+ * It's a local API call, so it can poll briskly.
+ */
+const STATUS_POLL_MS = 15_000;
+
 function RequestList() {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [statuses, setStatuses] = useState<Record<string, RequestStatus>>({});
@@ -346,6 +355,9 @@ function RequestList() {
     setEntries(loadHistory());
   }, []);
 
+  // A payer marks a request submitted from *their* browser, so this list goes
+  // stale on its own. Poll while the tab is visible, and re-read the moment it
+  // becomes visible again rather than making someone wait out an interval.
   useEffect(() => {
     if (entries.length === 0) return;
 
@@ -353,7 +365,7 @@ function RequestList() {
     // statuses of a newer one.
     let cancelled = false;
 
-    void (async () => {
+    async function read() {
       const results = await Promise.all(
         entries.map(async (entry) => {
           try {
@@ -368,22 +380,53 @@ function RequestList() {
           }
         })
       );
-      if (!cancelled) setStatuses(Object.fromEntries(results));
-    })();
+      if (cancelled) return;
+
+      setStatuses((previous) => {
+        const next = Object.fromEntries(results) as Record<string, RequestStatus>;
+        // A confirmation made here a moment ago outranks a poll that was already
+        // in flight: `confirmed` is terminal, so it can only be the newer fact.
+        for (const [id, status] of Object.entries(previous)) {
+          if (status === "confirmed") next[id] = "confirmed";
+        }
+        return next;
+      });
+    }
+
+    const tick = () => {
+      if (document.visibilityState === "visible") void read();
+    };
+
+    void read();
+    const timer = setInterval(tick, STATUS_POLL_MS);
+    document.addEventListener("visibilitychange", tick);
 
     return () => {
       cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
     };
   }, [entries]);
 
-  async function confirm(entry: HistoryEntry) {
+  /**
+   * Marking a request received by hand.
+   *
+   * A payment made through a Whisper Pay link settles itself — the payer's
+   * browser reports the transaction and the server verifies it. This is for the
+   * rest: money that arrived without a report, because the payer paid straight
+   * from their wallet, or reported it from a tab that never finished loading.
+   *
+   * It's the recipient's own judgement, made after looking at their shielded
+   * balance above. Nothing here checks it, because nothing here can.
+   */
+  async function confirm(statusId: string, entryId: string) {
     try {
-      await fetch(`/api/status/${statusKeyFor(entry)}`, {
+      await fetch(`/api/status/${statusId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "confirm" }),
       });
-      setStatuses((prev) => ({ ...prev, [entry.id]: "confirmed" }));
+      setStatuses((prev) => ({ ...prev, [entryId]: "confirmed" }));
     } catch {
       /* leave the badge as it was */
     }
@@ -467,14 +510,14 @@ function RequestList() {
                 >
                   Status
                 </button>
-                {status === "submitted" ? (
+                {status === "pending" ? (
                   <button
                     type="button"
-                    title="Mark as received"
-                    onClick={() => void confirm(entry)}
+                    title="Mark as received — for money that arrived without a report"
+                    onClick={() => void confirm(statusKeyFor(entry), entry.id)}
                     className="rounded-lg border border-emerald-400/40 px-2 py-1 text-xs text-emerald-300 transition hover:bg-emerald-400/10"
                   >
-                    Confirm
+                    Mark received
                   </button>
                 ) : null}
                 <button
@@ -495,11 +538,14 @@ function RequestList() {
       </ul>
 
       <p className="mt-4 border-t border-hairline pt-4 text-xs leading-relaxed text-muted">
-        <strong className="font-medium text-foreground">Why two steps:</strong> a
-        payer's transaction can be verified as a real, successful pool
-        transaction — but not as payment of <em>this</em> request, because the
-        transfer hides its amount and parties. Check your shielded balance above,
-        then confirm.
+        <strong className="font-medium text-foreground">
+          What "received" means:
+        </strong>{" "}
+        a payer reported a transaction and the server checked it against the
+        chain — it exists, it succeeded, it went through the pool. It can't be
+        checked against <em>this</em> request, since the transfer hides its
+        amount and parties, so your shielded balance above stays the last word.
+        Open a request's status link to see the transaction itself.
       </p>
       {entries.some((entry) => entry.schedule) ? (
         <p className="mt-3 text-xs leading-relaxed text-muted">
