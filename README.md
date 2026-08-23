@@ -159,8 +159,8 @@ the payment page states what *this* transaction publishes, quoting its own
 numbers — "the deposit is rounded up to 20 STRK, so the public leg says 20 STRK
 shielded, not what you paid" — so the claim can be checked against the figures
 directly above it. It also flags an amount precise enough to identify itself
-(seven decimal places is memorable in a way 12.5 isn't), as advice rather than a
-blocker. The wording comes from
+— four decimal places or more, past which a figure stops looking like a price
+and starts looking like a serial number — as advice rather than a blocker. The wording comes from
 [`assessPrivacy`](src/lib/strk20/privacy.ts), which adds no routing logic of its
 own — every branch reads a decision `planPayment` already made.
 
@@ -187,6 +187,30 @@ without drifting ([`src/lib/request/schedule.ts`](src/lib/request/schedule.ts)).
 Repetition has a privacy cost of its own — a shield-per-payment cadence is a
 strong fingerprint even when every transfer stays hidden. `docs/PRIVACY.md`
 covers it and what to do instead.
+
+### Your dashboard, and why a request can be missing from it
+
+`/dashboard` shows your shielded balance and the requests this browser knows
+about. That second half is the part worth explaining: the list lives in
+localStorage, not on a server, because a request is entirely contained in its
+link and a server-side copy would be a list of who billed whom — the one record
+this app is built not to keep.
+
+The cost is that the list doesn't follow you between browsers, and it bites in a
+specific case: you make a link on one machine and open your wallet on another,
+so the side being paid can't see the request at all. Opening the payment link
+with the recipient's wallet connected offers **Add to my dashboard**, which
+copies it into that browser. Nothing is sent anywhere; the offer only appears
+for the account the money is addressed to.
+
+Requests are dropped from the list after seven days — a live subscription
+excepted, since it's meant to be reopened each period.
+
+A request still showing as unpaid carries **Mark received**, for money that
+arrived without a report: a payer who paid straight from their wallet, or
+reported it from a tab that never finished loading. It's your own judgement,
+made after looking at your shielded balance; nothing checks it, because nothing
+can.
 
 ### The status link
 
