@@ -642,11 +642,13 @@ function RequestList() {
         <strong className="font-medium text-foreground">
           What "received" means:
         </strong>{" "}
-        a payer reported a transaction and the server checked it against the
-        chain — it exists, it succeeded, it went through the pool. It can't be
-        checked against <em>this</em> request, since the transfer hides its
-        amount and parties, so your shielded balance above stays the last word.
-        Open a request's status link to see the transaction itself.
+        either a payer reported a transaction and the server checked it against
+        the chain — it exists, it succeeded, it went through the pool — or you
+        pressed <em>Mark received</em> here yourself. Neither can be checked
+        against <em>this</em> request, since the transfer hides its amount and
+        parties, so your shielded balance above stays the last word. The hash is
+        verified the moment it's reported and then discarded, so neither this
+        page nor the status link can show you the transaction.
       </p>
       {entries.some((entry) => entry.schedule) ? (
         <p className="mt-3 text-xs leading-relaxed text-muted">

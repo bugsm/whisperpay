@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 
 import type { RequestStatus, StatusRecord } from "@/lib/request/types";
 import { getStatusStore } from "@/lib/store";
-import { isValidTxHash, verifyPoolTransaction } from "@/lib/strk20/verify";
+import { awaitPoolTransaction, isValidTxHash } from "@/lib/strk20/verify";
 
 /**
  * Request status.
@@ -30,6 +30,20 @@ import { isValidTxHash, verifyPoolTransaction } from "@/lib/strk20/verify";
  * unambiguous.
  */
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,32}(?:\.\d{1,3})?$/;
+
+/**
+ * Room for `awaitPoolTransaction` to outlast the gap between a wallet
+ * returning a hash and the chain having a receipt. 60s is the Vercel Hobby
+ * ceiling; the verifier's own budget sits well below it so a reply still
+ * gets out even if the last RPC call hangs.
+ *
+ * Worth naming the cost: this endpoint takes no authentication — it can't,
+ * since the payer is whoever holds the link — so anyone can make it hold an
+ * invocation for the budget by posting a hash that will never exist. An
+ * already-settled request returns without polling, which covers repeats;
+ * fresh ids are not covered, and rate limiting is the real answer.
+ */
+export const maxDuration = 60;
 
 export async function GET(
   _request: NextRequest,
@@ -104,7 +118,23 @@ export async function POST(
     );
   }
 
-  const verification = await verifyPoolTransaction(input.txHash);
+  // A request that's already settled needs no second opinion, and saying so
+  // costs one store read instead of up to half a minute of polling. The
+  // payer's own retries land here whenever an earlier attempt got through.
+  try {
+    const settled = await store.get(id);
+    if (settled?.status === "confirmed") {
+      return Response.json({ durable: store.durable, record: settled });
+    }
+  } catch {
+    /* an unreadable store is not a reason to refuse the report */
+  }
+
+  // Waits for a transaction that's merely young — see `awaitPoolTransaction`.
+  // The report arrives with `keepalive`, so this finishes even when the payer
+  // has already closed the tab, which is the case that used to strand a
+  // request on "Awaiting payment" with nobody left to fix it.
+  const verification = await awaitPoolTransaction(input.txHash);
   if (!verification.ok) {
     return Response.json(
       { error: verification.reason ?? "Transaction could not be verified.", verification },

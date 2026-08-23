@@ -51,6 +51,13 @@ interface Period {
   number: number;
   dueAt: number;
   status: RequestStatus;
+  /**
+   * Whether a payer reported a transaction that was checked on-chain, as
+   * opposed to the recipient marking this received by hand. `submittedAt` is
+   * written only on the reporting path, so its absence is the difference —
+   * and the page must not claim a verification that never happened.
+   */
+  reported: boolean;
 }
 
 export default async function StatusPage({
@@ -113,6 +120,7 @@ export default async function StatusPage({
           number: index + 1,
           dueAt: schedule ? installmentDueAt(schedule, index) : 0,
           status: record?.status ?? ("pending" satisfies RequestStatus),
+          reported: record?.submittedAt !== undefined,
         };
       })
     );
@@ -145,7 +153,7 @@ export default async function StatusPage({
         </div>
 
         <p className="mt-3 text-sm leading-relaxed text-muted">
-          {DETAIL[current.status]}
+          {detailFor(current)}
         </p>
 
         {schedule && cycle ? (
@@ -213,12 +221,23 @@ export default async function StatusPage({
           <strong className="font-medium text-foreground">
             What "received" is worth here:
           </strong>{" "}
-          the reported transaction is checked against the chain — it exists, it
-          succeeded, it touched the pool. It cannot be checked against{" "}
-          <em>this</em> request, because a private transfer hides its amount and
-          its parties. So this page reports a verified payment, not a proven
-          one; a recipient who needs certainty has their own shielded balance,
-          which nobody else can see.
+          {current.status === "confirmed" && !current.reported ? (
+            <>
+              nothing was reported for this one and nothing was checked against
+              the chain — the recipient marked it received themselves. That is
+              their word, and their shielded balance is the only place it could
+              have come from, which nobody else can see.
+            </>
+          ) : (
+            <>
+              the reported transaction is checked against the chain — it
+              exists, it succeeded, it touched the pool. It cannot be checked
+              against <em>this</em> request, because a private transfer hides
+              its amount and its parties. So this page reports a verified
+              payment, not a proven one; a recipient who needs certainty has
+              their own shielded balance, which nobody else can see.
+            </>
+          )}
         </p>
         <Link
           href="/"
@@ -245,9 +264,27 @@ const DETAIL: Record<RequestStatus, string> = {
   submitted:
     "A payer reported a transaction for this request, verified against the chain.",
   confirmed:
-    "A payer reported a transaction for this request, and it checks out on-chain: it exists, it succeeded, and it went through the privacy pool. What it can't show anyone is the amount or the parties — that's the pool working. The recipient can unlock the transaction itself below.",
+    "A payer reported a transaction for this request, and it checks out on-chain: it exists, it succeeded, and it went through the privacy pool. What it can't show anyone is the amount or the parties — that's the pool working.",
   expired: "This request is no longer payable.",
 };
+
+/**
+ * A request can reach `confirmed` two ways, and they are worth very
+ * different amounts to whoever reads this page. One was checked against the
+ * chain; the other is the recipient's own word, with nothing behind it. The
+ * page used to describe every confirmation as the first kind.
+ */
+function detailFor(period: Period): string {
+  if (period.status === "confirmed" && !period.reported) {
+    return (
+      "The recipient marked this received themselves. No transaction was " +
+      "reported to this server and nothing was checked on-chain — this is " +
+      "their word that the money arrived, which is the only thing anyone " +
+      "reading a private payment can offer."
+    );
+  }
+  return DETAIL[period.status];
+}
 
 const TONE: Record<RequestStatus, string> = {
   pending: "text-muted",

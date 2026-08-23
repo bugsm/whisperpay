@@ -8,7 +8,7 @@ privacy pool, so the amount, the payer and the recipient stay off the public
 record.
 
 - **Live:** https://whisperpay.vercel.app
-- **Mainnet proof:** [three pool transactions](#mainnet-proof), all
+- **Mainnet proof:** [five pool transactions](#mainnet-proof), all
   `ACCEPTED_ON_L1`
 - **Tests:** 89, no external dependencies — `npm test`
 
@@ -234,16 +234,22 @@ on your behalf.
 
 ## Mainnet proof
 
-Three real STRK20 pool transactions, each verified by
+Five real STRK20 pool transactions, each verified by
 [`scripts/strk20-json.mjs`](scripts/strk20-json.mjs) — the same check the
-judging panel runs — and recorded in [`strk20.json`](strk20.json). All three are
+judging panel runs — and recorded in [`strk20.json`](strk20.json). All five are
 `ACCEPTED_ON_L1` with 4 pool events each.
+
+No amounts are listed, and that is not an oversight: the pool hides the amount
+of a private transfer, so printing it here would give away the one number the
+protocol exists to keep. The same goes for the paying account.
 
 | # | Transaction |
 | --- | --- |
 | 1 | [`0x6f3417cb…557ede`](https://voyager.online/tx/0x6f3417cba37b8f2faa352f4300f561717d80a33eeaf8bbc2e985fa6e1557ede) |
 | 2 | [`0x5875580f…fb2ba9`](https://voyager.online/tx/0x5875580f10aec7c0d90fcf531908f14323caad0685842b8515282c0fcfb2ba9) |
 | 3 | [`0x568f522b…8c2c4c`](https://voyager.online/tx/0x568f522b9c66714afd2b7f7bbb614ef78749510d49bce015bd16add408c2c4c) |
+| 4 | [`0x0420267e…bd4047`](https://voyager.online/tx/0x0420267e047d68dbf9e3bc4dff7a61d443ede396f3bba4878bd9e3a076bd4047) |
+| 5 | [`0x05190a7b…36443b`](https://voyager.online/tx/0x05190a7b8bb6e08b5c1aa3fb8f7eb1c8c2387a9df0a209ff05a0d8ff3e36443b) |
 
 Re-check them yourself:
 
@@ -253,7 +259,7 @@ node scripts/strk20-json.mjs --check
 
 ## Status, and what's left
 
-M1–M6 are built and running against mainnet. The app is deployed, the three
+M1–M6 are built and running against mainnet. The app is deployed, the five
 transactions are verified and recorded.
 
 **Still open before the deadline:**
@@ -263,9 +269,6 @@ transactions are verified and recorded.
 
 **Known limits, stated rather than hidden:**
 
-- The signed-receipt flow has been verified against the account contract on
-  mainnet, but a wallet has not yet produced a receipt signature end to end —
-  `wallet_signTypedData` is the one path exercised only by its types.
 - A status record lives 7 days, and the browser-local list of your links prunes
   on the same schedule. Long-running subscriptions are exempt.
 - `submitted` remains in the status type for records written before payments

@@ -72,9 +72,12 @@ describe("StatusRecord carries nothing worth stealing", () => {
 describe("the status route never writes a hash into the record", () => {
   it("verifies a reported hash without persisting it", () => {
     // The hash still arrives and is still checked on-chain; what must not
-    // happen is it ending up in the object handed to the store.
+    // happen is it ending up in the object handed to the store. Either
+    // verifier satisfies that — `awaitPoolTransaction` is the same check with
+    // a budget for a transaction that hasn't landed yet, and holds the hash
+    // for no longer than the request that carried it.
     assert.ok(
-      ROUTE.includes("verifyPoolTransaction"),
+      /\b(await|verify)PoolTransaction\b/.test(ROUTE),
       "the reported hash should still be verified"
     );
     assert.ok(

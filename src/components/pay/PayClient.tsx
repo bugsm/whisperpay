@@ -30,8 +30,13 @@ import { mainnetProvider } from "@/lib/strk20/provider";
 
 /**
  * Backoff for re-reporting a payment whose receipt the server couldn't read
- * yet. Roughly a minute in total, which comfortably outlasts the gap between
- * submitting a transaction and it appearing in a block.
+ * yet. The server now waits out a short gap on its own, so each of these
+ * attempts covers far more than the delay suggests — together they span the
+ * first few minutes after submission.
+ *
+ * They are not the guarantee, though. A pool transaction can take longer
+ * than any fixed schedule, so the attempt that matters is the one made after
+ * `waitForTransaction` returns, when the receipt is known to exist.
  */
 const REPORT_RETRY_DELAYS_MS = [5000, 15000, 30000];
 
@@ -194,10 +199,26 @@ export default function PayClient({
 
     // Reported *before* the wait below, not after it. The wait runs for up to
     // twenty minutes, and the recipient watching the status link shouldn't have
-    // to sit through it to see "submitted" — especially since the server
-    // re-verifies the hash against the chain itself and doesn't need this page
-    // to have finished anything.
+    // to sit through it to see "Received" — the server checks the hash against
+    // the chain itself and doesn't need this page to have finished anything.
     const firstReport = reportPayment(txHash);
+
+    // Early attempts run *alongside* the wait below rather than queued behind
+    // it, so a payer who closes the tab — which is every payer, once the
+    // wallet says it worked — has still had several chances to report.
+    //
+    // They cover the first few minutes and no more. Running them instead of
+    // the post-settlement attempt would strand any transaction slower than
+    // that, so both exist: these for the tab that closes early, the one below
+    // for the transaction that lands late.
+    const earlyReports = (async () => {
+      if (await firstReport) return true;
+      for (const delay of REPORT_RETRY_DELAYS_MS) {
+        await sleep(delay);
+        if (await reportPayment(txHash)) return true;
+      }
+      return false;
+    })();
 
     try {
       // Pool transactions verify a STARK proof on-chain, so the budget here is
@@ -213,17 +234,14 @@ export default function PayClient({
     setPhase({ name: "paid", txHash });
     void refreshBalances();
 
-    // The early report can legitimately fail: the server verifies by reading a
-    // receipt, and a transaction submitted a second ago doesn't have one yet.
-    // So back off and try again rather than stranding the status page on a
-    // transaction whose only problem is being young. Only after all of that is
-    // the failure real enough to put in front of the payer.
+    // The wait has returned, so the receipt exists — this attempt has a better
+    // chance than any before it, and it is the only one whose timing doesn't
+    // have to guess. Only once it too has failed is the failure real enough to
+    // put in front of the payer, who can then tell the recipient to mark it
+    // received themselves.
     void (async () => {
-      if (await firstReport) return;
-      for (const delay of REPORT_RETRY_DELAYS_MS) {
-        await sleep(delay);
-        if (await reportPayment(txHash)) return;
-      }
+      if (await earlyReports) return;
+      if (await reportPayment(txHash)) return;
       setReportFailed(true);
     })();
   }
