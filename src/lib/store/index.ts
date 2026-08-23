@@ -10,9 +10,9 @@ import type { StatusRecord } from "@/lib/request/types";
  * records what happened afterwards (payer submitted a tx, recipient confirmed
  * receipt), which is a nice-to-have on top.
  *
- * Configure `KV_REST_API_URL` + `KV_REST_API_TOKEN` (Vercel KV or Upstash
- * Redis) to make it durable. Without them the app falls back to process memory
- * and says so, rather than pretending status is being persisted.
+ * Point it at any Upstash-compatible Redis over REST to make it durable — see
+ * `restCredentials` for the variables. Without them the app falls back to
+ * process memory and says so, rather than pretending status is being persisted.
  */
 export interface StatusStore {
   get(id: string): Promise<StatusRecord | null>;
@@ -44,9 +44,8 @@ function parseRecord(raw: string): StatusRecord | null {
 }
 
 /**
- * Upstash-compatible REST store (also what Vercel KV speaks). Chosen over a
- * client library so there's no extra dependency and no connection pooling to
- * worry about on serverless.
+ * Upstash-compatible REST store. Chosen over a client library so there's no
+ * extra dependency and no connection pooling to worry about on serverless.
  */
 function createKvStore(baseUrl: string, token: string): StatusStore {
   const root = baseUrl.replace(/\/+$/, "");
@@ -116,14 +115,39 @@ function createMemoryStore(): StatusStore {
   };
 }
 
+/**
+ * The REST credentials, under either name a host might supply them.
+ *
+ * Nothing here was ever tied to Vercel KV the product — the store speaks
+ * Upstash's REST API over plain `fetch`, and Vercel KV happened to be Upstash
+ * underneath, so one implementation served both and only the variable names
+ * differed. Vercel KV has since been retired in favour of Marketplace
+ * integrations that inject `UPSTASH_REDIS_REST_*` instead.
+ *
+ * So both spellings are read. A database provisioned either way works without
+ * anyone copying credentials into a second pair of variables, and neither name
+ * is the "real" one.
+ *
+ * `REDIS_URL` (`redis://…`) is deliberately not read even when a host provides
+ * it: that's the TCP protocol, which needs a Redis client library and a socket,
+ * and this store is REST-over-fetch precisely to avoid both.
+ */
+function restCredentials(): { url: string; token: string } | undefined {
+  const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
+  const token =
+    process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  return url && token ? { url, token } : undefined;
+}
+
 let cached: StatusStore | undefined;
 
 export function getStatusStore(): StatusStore {
   if (cached) return cached;
 
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
-
-  cached = url && token ? createKvStore(url, token) : createMemoryStore();
+  const credentials = restCredentials();
+  cached = credentials
+    ? createKvStore(credentials.url, credentials.token)
+    : createMemoryStore();
   return cached;
 }
