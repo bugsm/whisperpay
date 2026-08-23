@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import LiveStatus from "./LiveStatus";
-import RevealProof from "./RevealProof";
 import { decodeSchedule } from "@/lib/request/codec";
 import {
   currentInstallment,
@@ -23,11 +22,9 @@ import { getStatusStore } from "@/lib/store";
  *
  * What a reader learns is exactly one fact per period — unpaid or received —
  * plus the date it changed. What they don't learn is the amount, the token,
- * either party, the note, or the transaction. The transaction particularly: it
- * is stored now, so the recipient can see proof, but it is released only
- * against a signature from the address the request was addressed to
- * (`proof.ts`). For a payer who shielded to pay, that hash leads to a public
- * deposit with their address on it — so it is not part of this page.
+ * either party, the note, or the transaction. The transaction particularly:
+ * it's never stored (`StatusRecord`), because for a payer who shielded to pay,
+ * the hash leads to a public deposit with their address on it.
  *
  * Dates are shown to the day and in UTC. An exact timestamp would narrow a
  * private transfer down to the handful of pool transactions in that second,
@@ -54,10 +51,6 @@ interface Period {
   number: number;
   dueAt: number;
   status: RequestStatus;
-  /** Status store key — what a reveal is addressed to. */
-  key: string;
-  /** Whether a transaction hash is on file for the recipient to unlock. */
-  hasProof: boolean;
 }
 
 export default async function StatusPage({
@@ -115,15 +108,11 @@ export default async function StatusPage({
       indices.map(async (index) => {
         const key = schedule ? installmentStatusId(id, index) : id;
         const record: StatusRecord | null = await store.get(key);
-        // Only ever a boolean past this line: the hash itself must not cross
-        // into the rendered page, where anyone holding the link would see it.
         return {
           index,
           number: index + 1,
           dueAt: schedule ? installmentDueAt(schedule, index) : 0,
           status: record?.status ?? ("pending" satisfies RequestStatus),
-          key,
-          hasProof: Boolean(record?.txHash && record.recipientCommitment),
         };
       })
     );
@@ -178,8 +167,6 @@ export default async function StatusPage({
         ) : null}
 
         <LiveStatus settled={current.status === "confirmed"} />
-
-        {current.hasProof ? <RevealProof statusId={current.key} /> : null}
 
         {!store.durable ? (
           <p className="mt-5 rounded-xl border border-amber-400/30 bg-amber-400/5 p-3 text-xs leading-relaxed text-amber-200/80">

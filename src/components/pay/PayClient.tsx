@@ -14,7 +14,6 @@ import {
   type Schedule,
 } from "@/lib/request/schedule";
 import { loadHistory, saveToHistory } from "@/lib/request/history";
-import { recipientCommitment } from "@/lib/request/proof";
 import { isExpired, type RequestStatus } from "@/lib/request/types";
 import {
   findToken,
@@ -240,15 +239,10 @@ export default function PayClient({
    */
   async function reportPayment(txHash: string): Promise<boolean> {
     try {
-      // Computed here, from the address in the link, so the server learns a
-      // hash instead of a recipient. It's what later lets that recipient — and
-      // only them — read this hash back. See `proof.ts`.
-      const commitment = await recipientCommitment(statusId, request.recipient);
-
       const response = await fetch(`/api/status/${statusId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ txHash, recipientCommitment: commitment }),
+        body: JSON.stringify({ txHash }),
         keepalive: true,
       });
       return response.ok;

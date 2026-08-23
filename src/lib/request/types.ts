@@ -73,18 +73,23 @@ export type RequestStatus = "pending" | "submitted" | "confirmed" | "expired";
 /**
  * What the server keeps about a request, and deliberately all of it.
  *
- * The payer's transaction hash is kept now, so the recipient can see proof
- * rather than being asked to take a status badge on faith. That makes this the
- * one field here that could unmask someone: for a payer who had to shield
- * first, the hash leads straight to a public deposit carrying their address and
- * the amount, and status records are readable by anyone holding the id.
+ * The payer's transaction hash is verified when it's reported and then thrown
+ * away rather than stored. Keeping it would undo much of the point: for a payer
+ * who had to shield first, the hash leads straight to a public deposit carrying
+ * their address and the amount. Storing that against a request id would rebuild
+ * the payer↔recipient link the pool exists to break — and hand it to anyone who
+ * has the id, since status is readable by anyone who does.
  *
- * So it is never served by `GET`. Releasing it takes a signature from the
- * address the request was addressed to, checked against `recipientCommitment`
- * — see `proof.ts` for how that works and what it does not protect against.
+ * A gated version of this was tried — the hash kept, and released only against
+ * a signature from the recipient — and dropped on purpose. It bought the
+ * recipient a transaction to look at, at the cost of the strongest thing this
+ * server can say about itself: that the record contains nothing worth stealing.
+ * A store that holds a payer-identifying value behind a check is a weaker claim
+ * than a store that never holds one, and the check is only as good as the code
+ * guarding it.
  *
- * Everything else is a lifecycle state and two timestamps. Nothing here names a
- * party, a token, or an amount.
+ * So the record is a lifecycle state and two timestamps. Nothing here
+ * identifies a party, a token, or an amount.
  */
 export interface StatusRecord {
   id: string;
@@ -93,17 +98,6 @@ export interface StatusRecord {
   submittedAt?: number;
   /** Unix seconds, set when a verified payment was reported. */
   confirmedAt?: number;
-  /**
-   * The payer's verified transaction hash. Withheld from every read except a
-   * signed reveal by the recipient.
-   */
-  txHash?: string;
-  /**
-   * `SHA-256(id : recipientAddress)`, computed in the payer's browser — the
-   * server never sees the address it commits to. Absent on records written
-   * before proofs existed, which simply can't be revealed.
-   */
-  recipientCommitment?: string;
 }
 
 /** Longest memo we'll put in a link, to keep URLs manageable. */
