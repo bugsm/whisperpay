@@ -19,6 +19,7 @@ import {
   encodeReceipt,
   parseReceipt,
   receiptTypedData,
+  signatureParts,
   type Receipt,
 } from "@/lib/request/receipt";
 
@@ -141,5 +142,46 @@ describe("encodeReceipt / decodeReceipt", () => {
   it("returns null when the payload decodes but isn't a receipt", () => {
     const encoded = encodeReceipt({ ...receipt(), claim: "whatever" } as Receipt);
     assert.equal(decodeReceipt(encoded), null);
+  });
+});
+
+describe("signatureParts — refusing to build a receipt nobody can check", () => {
+  it("keeps an array of felts as it is", () => {
+    assert.deepEqual(signatureParts(["0x1", "0x2"]), ["0x1", "0x2"]);
+  });
+
+  it("keeps a longer array, for accounts that sign with more than two felts", () => {
+    assert.deepEqual(signatureParts(["0x1", "0x2", "0x3"]), ["0x1", "0x2", "0x3"]);
+  });
+
+  it("normalises an r/s pair to hex felts", () => {
+    assert.deepEqual(signatureParts({ r: 255n, s: 16n }), ["0xff", "0x10"]);
+  });
+
+  it("rejects an empty array rather than passing it off as a signature", () => {
+    // The bug this guards: an empty array survived all the way to the
+    // verifier's screen, where the receipt was refused as malformed — long
+    // after the recipient had handed it over.
+    assert.equal(signatureParts([]), null);
+  });
+
+  it("rejects a shape it doesn't understand", () => {
+    assert.equal(signatureParts(undefined), null);
+    assert.equal(signatureParts(null), null);
+    assert.equal(signatureParts("0xdeadbeef"), null);
+    assert.equal(signatureParts({ signature: ["0x1"] }), null);
+  });
+
+  it("rejects an r/s pair that isn't numeric", () => {
+    assert.equal(signatureParts({ r: "nope", s: "also nope" }), null);
+  });
+
+  it("never returns something parseReceipt would refuse", () => {
+    // The two must agree, or a receipt can be assembled and then rejected.
+    for (const input of [["0x1", "0x2"], { r: 1n, s: 2n }]) {
+      const parts = signatureParts(input);
+      assert.ok(parts);
+      assert.ok(parseReceipt(receipt({ signature: parts })));
+    }
   });
 });

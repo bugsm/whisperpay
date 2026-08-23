@@ -46,14 +46,14 @@ On a public chain, every payment link normally leaks the full picture: who paid,
 
 Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · starknet.js v10 ·
 get-starknet (Wallet Standard) · STRK20 Privacy Wallet API · Starknet ID ·
-Zustand · Upstash KV (optional)
+Zustand · Upstash Redis
 
 **No custom Cairo contracts, nothing deployed.** Every pool operation — deposit,
 transfer, withdraw — is composed as STRK20 actions and submitted through the
 user's wallet via `strk20InvokeTransaction`. Starknet ID resolution calls the
-mainnet naming contract read-only through the app's own RPC. The only optional
-server dependency is a KV store for request status, and payment works without
-it.
+mainnet naming contract read-only through the app's own RPC. The only server
+dependency is a Redis for request status — needed on serverless, where each
+function has its own memory, and payment works without it either way.
 
 ## Goal for the sprint
 
@@ -116,15 +116,15 @@ plain Stark-curve keys.
 ## Status
 
 M1–M6 are built and running against mainnet infrastructure. `strk20.json` holds
-three verified mainnet pool transactions. Still to do: a demo video and a public
-deployment — see [Getting to mainnet](#getting-to-mainnet).
+three verified mainnet pool transactions and the deployment URL. Still to do: a
+demo video.
 
 ## Run it
 
 ```bash
 npm install
 npm run dev          # http://localhost:3000
-npm test             # routing and privacy-claim tests, no extra dependencies
+npm test             # routing, privacy, address and receipt tests — no extra dependencies
 ```
 
 No configuration needed — it defaults to a public mainnet RPC. Copy
@@ -165,7 +165,7 @@ blocker. The wording comes from
 own — every branch reads a decision `planPayment` already made.
 
 [**docs/PRIVACY.md**](docs/PRIVACY.md) has the full accounting of what is and
-isn't hidden, and why "submitted" and "received" are separate states.
+isn't hidden, and what "received" is and isn't evidence of.
 
 ### Recurring requests
 
@@ -194,7 +194,7 @@ Every request comes with a second link, `/s/<id>`, and the difference between
 the two is the point. The payment link *is* the invoice: it carries the amount,
 the recipient and the note, so sharing it to prove you were paid shares all of
 that too. The status link carries a request id — 72 random bits that describe
-nothing — and renders one fact: unpaid, submitted, or received.
+nothing — and renders one fact: unpaid or received.
 
 That page can be as thin as it is because the record behind it is. The payer's
 transaction hash is verified when reported and then **discarded rather than
@@ -203,22 +203,29 @@ a public deposit with their address on it, and status is readable by anyone
 holding the id. So the server keeps a lifecycle state and two timestamps, and
 that is the whole of it.
 
+A record expires after seven days, the same window the browser keeps its own
+history for, so a request and its status disappear together rather than leaving
+a status page for an invoice nobody can produce.
+
 Recurring links carry their schedule in the URL, so the page shows "payment 3 of
 12" and the recent periods — cadence and length, still no amount and no parties.
 
 ### Getting to mainnet
 
-- [ ] [Ready](https://www.ready.co/) or [Xverse](https://www.xverse.app/), switched to mainnet
-- [ ] Some mainnet STRK — a few is enough for all three transactions
-- [ ] **Register with the pool from the wallet's privacy section.** One
+Done for this entry, and the same path for anyone reproducing it:
+
+- [x] [Ready](https://www.ready.co/) or [Xverse](https://www.xverse.app/), switched to mainnet
+- [x] Some mainnet STRK — a few is enough for all three transactions
+- [x] **Register with the pool from the wallet's privacy section.** One
       transaction, done once; nothing can be sent to you privately until you do
-- [ ] **Shield some STRK in the wallet**, so the first payment runs the
+- [x] **Shield some STRK in the wallet**, so the first payment runs the
       already-funded route. (Paying with an empty shielded balance also works —
       Whisper Pay shields and pays in one transaction — but then the deposit is
       public, so shield ahead of time if you care about that.)
-- [ ] Use Whisper Pay end to end: create a link, pay it, withdraw — three pool transactions
-- [ ] `node scripts/strk20-json.mjs <hashes>` records them, running the same
+- [x] Use Whisper Pay end to end: create a link, pay it, withdraw — three pool transactions
+- [x] `node scripts/strk20-json.mjs <hashes>` records them, running the same
       on-chain check the judging panel does so an ineligible hash never gets written
+- [ ] A demo video, recorded and set with `--video`
 
 ## Team
 

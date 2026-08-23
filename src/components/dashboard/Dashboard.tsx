@@ -22,6 +22,7 @@ import {
   RECEIPT_VERSION,
   receiptToJson,
   receiptTypedData,
+  signatureParts,
   verifyPath,
   type Receipt,
 } from "@/lib/request/receipt";
@@ -479,17 +480,35 @@ function RequestList() {
       const signature = await account.signMessage(
         receiptTypedData(request, issuedAt)
       );
+
+      const parts = signatureParts(signature);
+      if (!parts) {
+        setReceiptError(
+          "Your wallet returned a signature in a form Whisper Pay can't read, so there's no receipt to hand over — one built from it would fail every check. Nothing was sent anywhere."
+        );
+        return;
+      }
+
       setReceipt({
         version: RECEIPT_VERSION,
         request,
         claim: RECEIPT_CLAIM,
         issuedAt,
         recipient: address,
-        signature: toParts(signature),
+        signature: parts,
       });
-    } catch {
-      // Declining in the wallet lands here, and needs no explaining.
-      setReceiptError(null);
+    } catch (error) {
+      // Declining in the wallet needs no explaining. Everything else does —
+      // a wallet without `wallet_signTypedData` fails here too, and silence
+      // leaves the recipient pressing a button that appears to do nothing.
+      const failure = describeStrk20Error(error);
+      setReceiptError(
+        failure.benign
+          ? null
+          : `Your wallet couldn't sign this receipt.${
+              failure.raw ? ` It said: ${failure.raw}` : ""
+            }`
+      );
     } finally {
       setSigning(null);
     }
@@ -639,18 +658,6 @@ function RequestList() {
       ) : null}
     </section>
   );
-}
-
-/** Wallet signatures come back as felts or as an r/s pair; store felts. */
-function toParts(signature: unknown): string[] {
-  if (Array.isArray(signature)) return signature.map((part) => String(part));
-  if (typeof signature === "object" && signature !== null) {
-    const { r, s } = signature as { r?: unknown; s?: unknown };
-    if (r !== undefined && s !== undefined) {
-      return [r, s].map((value) => `0x${BigInt(String(value)).toString(16)}`);
-    }
-  }
-  return [];
 }
 
 function shortAddress(address: string): string {

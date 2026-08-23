@@ -142,6 +142,40 @@ export function parseReceipt(value: unknown): Receipt | null {
   };
 }
 
+/**
+ * A wallet's signature, reduced to the felts a receipt carries.
+ *
+ * Accounts answer `signMessage` differently: most return an array of felts, the
+ * plain Stark-curve path returns an `{ r, s }` pair. Anything else is not a
+ * signature this app can put its name to.
+ *
+ * `null` rather than an empty array for those, and the distinction matters: an
+ * empty array reads as a signature right up until `parseReceipt` refuses it,
+ * which happens on the verifier's screen — long after the recipient handed the
+ * file over believing it was good. A receipt that cannot be checked has to fail
+ * while the person who can do something about it is still looking.
+ */
+export function signatureParts(signature: unknown): string[] | null {
+  if (Array.isArray(signature)) {
+    const parts = signature.map((part) => String(part));
+    return parts.length > 0 ? parts : null;
+  }
+
+  if (typeof signature === "object" && signature !== null) {
+    const { r, s } = signature as { r?: unknown; s?: unknown };
+    if (r !== undefined && s !== undefined) {
+      try {
+        return [r, s].map((value) => `0x${BigInt(String(value)).toString(16)}`);
+      } catch {
+        // r/s that aren't numeric — not a Stark signature, whatever it is.
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
 /** Pretty JSON, which is what gets downloaded — receipts get read by people. */
 export function receiptToJson(receipt: Receipt): string {
   return `${JSON.stringify(receipt, null, 2)}\n`;

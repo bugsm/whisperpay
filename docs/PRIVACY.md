@@ -113,7 +113,7 @@ Whisper Pay's backend is deliberately thin.
   server-side table of who billed whom.
 - **The list of links you created lives in your browser's localStorage**, not on
   the server. Clearing site data clears it.
-- **Status is opt-in and minimal.** If a KV store is configured, the server holds
+- **Status is minimal.** Where a Redis is configured, the server holds
   `{id, status, submittedAt?, confirmedAt?}` — no amounts, no addresses, and
   **not the transaction hash**. The hash is verified when it's reported and then
   discarded: for a payer who shielded in order to pay, it leads straight to a
@@ -157,8 +157,8 @@ accountant, a client's finance team, or a public page hands them everything.
 
 `/s/<id>` exists to be shared instead. It is addressed by the request id alone,
 and an id is 72 random bits that describe nothing: no amount, no token, neither
-party, no note. What a reader learns is one fact per period — unpaid, submitted
-or received — and the date it changed.
+party, no note. What a reader learns is one fact per period — unpaid or
+received — and the date it changed.
 
 That page can only be this thin because the record behind it is. Since the
 server never stores the transaction hash, there is nothing on the page to
@@ -178,24 +178,31 @@ can say "payment 3 of 12" and list recent periods. That parameter reveals
 cadence and length — worth knowing before you share one — and still nothing
 about amount or parties.
 
-## Why "submitted" and "confirmed" are different states
+## What "received" is, and isn't
 
 When a payer completes a payment, their browser reports the transaction hash.
 The server verifies that hash on-chain: it exists, it succeeded, and the pool
-emitted an event in it (`src/lib/strk20/verify.ts`).
+emitted an event in it (`src/lib/strk20/verify.ts`). That moves the request to
+**received**.
 
-That is the *most* anyone can verify from a hash. Because a private transfer
-hides its amount and its parties, nobody — not the server, not an observer, not
-us — can prove from the chain that a given transaction paid a given request. A
-payer could report an unrelated pool transaction and it would verify.
+Be exact about what that establishes, because it is less than the word suggests.
+A verified hash proves *a* successful pool transaction happened. It does not
+prove that transaction paid *this* request — a private transfer hides its amount
+and its parties, so nobody, us included, can tie one to the other. A payer could
+report an unrelated pool transaction and it would verify just the same.
+
+Treating a verified hash as settlement is a deliberate trade: it costs the
+recipient no clicks, and the alternative — an intermediate "submitted" state
+waiting on the recipient to confirm — turned out to strand payments whenever
+that person never opened the app. What it buys in convenience it gives up in
+precision, and the status page says so to whoever reads it.
+
+The one source of certainty is unchanged, and it isn't here: the recipient,
+looking at their own shielded balance through their own viewing key. That is the
+privacy guarantee showing through the product — the reason this page reports a
+verified payment rather than a proven one.
 
 Since the hash proves so little and reveals so much, it isn't kept: verification
 happens at the moment it's reported, and what survives is that *a* verified pool
-transaction was reported, and when.
-
-So the request moves to **submitted**, not paid. Only the recipient, looking at
-their own shielded balance through their own viewing key, can tell that the money
-arrived — and it's their click that moves it to **confirmed**.
-
-The gap between those two states is not a limitation to be engineered away. It
-is the privacy guarantee, showing through the product.
+transaction was reported, and when. `src/lib/request/status-privacy.test.ts`
+fails the build if that stops being true.
