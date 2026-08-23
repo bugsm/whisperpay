@@ -115,6 +115,46 @@ function rawMessage(error: unknown): string {
   return String(error);
 }
 
+/** Words a wallet uses when someone turns a prompt down. */
+const DECLINE_VERB = "reject|den(y|ied)|declin|abort|cancel|refus|dismiss";
+
+/**
+ * Either order, with a bounded gap: "user … rejected", or "cancelled by the
+ * user". The bound stops the two halves matching across unrelated parts of a
+ * stringified error object.
+ */
+const DECLINED_BY_USER = [
+  new RegExp(`\\buser\\b[\\s\\S]{0,40}?(${DECLINE_VERB})`, "i"),
+  new RegExp(`(${DECLINE_VERB})\\w*[\\s\\S]{0,20}?\\bby (the )?user\\b`, "i"),
+];
+
+/**
+ * A message that means "the person said no", not "something went wrong".
+ *
+ * Wallets report a plain rejection without a STRK20 code and don't agree on
+ * the wording — "User rejected", "User denied", "User abort", "Canceled by
+ * user". Matching those matters because callers branch on `benign` to decide
+ * whether to say anything at all, so an unmatched decline turns closing a
+ * dialog into an error message.
+ *
+ * The failure in the other direction is worse, and a loose substring match
+ * walks straight into it. `abort` on its own matches "AbortError: The
+ * operation was aborted"; `refus` matches "connect ECONNREFUSED", and matches
+ * a wallet refusing on privacy grounds too. Each would be filed as a benign
+ * cancellation and then shown to nobody — a real failure, silenced, which is
+ * the bug this path exists to avoid.
+ *
+ * So a decline has to name the person doing the declining. The verb alone is
+ * never enough. A message that doesn't mention a user falls through to the
+ * generic failure, which at least gets reported.
+ *
+ * `USER_REFUSED_OP` never reaches here — `extractCode` maps that constant to
+ * code 113 first, and `errors.test.ts` holds it to that.
+ */
+function looksLikeUserDecline(message: string): boolean {
+  return DECLINED_BY_USER.some((pattern) => pattern.test(message));
+}
+
 export function describeStrk20Error(error: unknown): Strk20Failure {
   const raw = rawMessage(error);
   const code = extractCode(error);
@@ -139,12 +179,7 @@ export function describeStrk20Error(error: unknown): Strk20Failure {
     };
   }
 
-  // Wallets commonly report a plain user rejection without a STRK20 code, and
-  // they don't agree on the wording: "User rejected", "User denied", "User
-  // abort", "Canceled by user". Missing one has a cost that isn't obvious —
-  // callers branch on `benign` to decide whether to say anything at all, so an
-  // unmatched decline turns "you closed the dialog" into an error message.
-  if (/reject|declin|denied|cancel|abort|refus|dismiss/i.test(raw)) {
+  if (looksLikeUserDecline(raw)) {
     return { ...BY_CODE[113], raw };
   }
 

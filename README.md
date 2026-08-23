@@ -10,7 +10,7 @@ record.
 - **Live:** https://whisperpay.vercel.app
 - **Mainnet proof:** [three pool transactions](#mainnet-proof), all
   `ACCEPTED_ON_L1`
-- **Tests:** 84, no external dependencies — `npm test`
+- **Tests:** 89, no external dependencies — `npm test`
 
 ## The problem, precisely
 
@@ -211,7 +211,7 @@ git clone https://github.com/bugsm/whisperpay.git
 cd whisperpay
 npm install
 npm run dev      # http://localhost:3000
-npm test         # 84 tests, node:test, no extra dependencies
+npm test         # 89 tests, node:test, no extra dependencies
 npm run build    # production build
 ```
 

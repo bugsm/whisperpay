@@ -50,18 +50,16 @@ describe("describeStrk20Error", () => {
   });
 });
 
-describe("describeStrk20Error — the wordings wallets use to say 'no'", () => {
-  // Each of these is a decline, and each must come back benign: callers branch
-  // on `benign` to decide whether to show anything, so a missed wording turns
-  // closing a dialog into an error message.
+describe("describeStrk20Error — telling a decline from a failure", () => {
+  // Real wallet wordings. Each is someone turning a prompt down, and each must
+  // come back benign: callers branch on `benign` to decide whether to show
+  // anything, so a missed wording turns closing a dialog into an error.
   const declines = [
     "User rejected request",
     "User denied the signature",
     "User abort",
     "Canceled by user",
     "The user declined",
-    "Request refused",
-    "User dismissed the prompt",
   ];
 
   for (const message of declines) {
@@ -72,9 +70,31 @@ describe("describeStrk20Error — the wordings wallets use to say 'no'", () => {
     });
   }
 
-  it("does not mistake an unrelated failure for a decline", () => {
-    const failure = describeStrk20Error(new Error("RPC 502 from provider"));
-    assert.equal(failure.kind, "unknown");
-    assert.equal(failure.benign, false);
+  // The dangerous direction. A benign verdict is never shown to anyone, so a
+  // real failure filed as a decline disappears — which is worse than an
+  // over-reported one. None of these mention a user; none may be benign.
+  const failures = [
+    "AbortError: The operation was aborted.",
+    "signal is aborted without reason",
+    "connect ECONNREFUSED 127.0.0.1:443",
+    '{"aborted":false,"code":"ETIMEDOUT"}',
+    "Wallet refused: this would leak your deposit",
+    "RPC 502 from provider",
+    "Transaction reverted",
+  ];
+
+  for (const message of failures) {
+    it(`does not silence "${message}"`, () => {
+      const failure = describeStrk20Error(new Error(message));
+      assert.equal(failure.benign, false, "a real failure must be reported");
+    });
+  }
+
+  it("still maps USER_REFUSED_OP by its constant, not by wording", () => {
+    // Underscored, so the word-boundary patterns miss it on purpose —
+    // extractCode catches it first.
+    const failure = describeStrk20Error(new Error("USER_REFUSED_OP"));
+    assert.equal(failure.kind, "cancelled");
+    assert.equal(failure.benign, true);
   });
 });
