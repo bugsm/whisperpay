@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { StatusRecord } from "@/lib/request/types";
+import { parseRecord } from "./record";
 
 /**
  * Where request status lives — the one piece of state a link can't carry.
@@ -29,19 +30,6 @@ const KEY_PREFIX = "whisperpay:status:";
  * rather than leaving a status page for an invoice nobody can produce.
  */
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24 * 7;
-
-function parseRecord(raw: string): StatusRecord | null {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const record = parsed as StatusRecord;
-    return typeof record.id === "string" && typeof record.status === "string"
-      ? record
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Upstash-compatible REST store. Chosen over a client library so there's no

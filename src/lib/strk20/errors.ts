@@ -139,8 +139,12 @@ export function describeStrk20Error(error: unknown): Strk20Failure {
     };
   }
 
-  // Wallets commonly report a plain user rejection without a STRK20 code.
-  if (/reject|declin|denied|cancel/i.test(raw)) {
+  // Wallets commonly report a plain user rejection without a STRK20 code, and
+  // they don't agree on the wording: "User rejected", "User denied", "User
+  // abort", "Canceled by user". Missing one has a cost that isn't obvious —
+  // callers branch on `benign` to decide whether to say anything at all, so an
+  // unmatched decline turns "you closed the dialog" into an error message.
+  if (/reject|declin|denied|cancel|abort|refus|dismiss/i.test(raw)) {
     return { ...BY_CODE[113], raw };
   }
 

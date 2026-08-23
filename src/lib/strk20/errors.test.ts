@@ -49,3 +49,32 @@ describe("describeStrk20Error", () => {
     assert.equal(failure.benign, true);
   });
 });
+
+describe("describeStrk20Error — the wordings wallets use to say 'no'", () => {
+  // Each of these is a decline, and each must come back benign: callers branch
+  // on `benign` to decide whether to show anything, so a missed wording turns
+  // closing a dialog into an error message.
+  const declines = [
+    "User rejected request",
+    "User denied the signature",
+    "User abort",
+    "Canceled by user",
+    "The user declined",
+    "Request refused",
+    "User dismissed the prompt",
+  ];
+
+  for (const message of declines) {
+    it(`treats "${message}" as a cancellation`, () => {
+      const failure = describeStrk20Error(new Error(message));
+      assert.equal(failure.kind, "cancelled");
+      assert.equal(failure.benign, true);
+    });
+  }
+
+  it("does not mistake an unrelated failure for a decline", () => {
+    const failure = describeStrk20Error(new Error("RPC 502 from provider"));
+    assert.equal(failure.kind, "unknown");
+    assert.equal(failure.benign, false);
+  });
+});

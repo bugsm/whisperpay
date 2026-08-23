@@ -1,255 +1,281 @@
 # Whisper Pay
 
-One-link private payment requests on Starknet, powered by STRK20 shielded transfers.
+**Send someone a link to get paid — without publishing what you charged them.**
 
-## Innovation
+A payment link is the easiest way to invoice someone and the worst way to keep
+it private. Whisper Pay keeps the link and routes the money through the STRK20
+privacy pool, so the amount, the payer and the recipient stay off the public
+record.
 
-Whisper Pay routes each payment by reading the payer's shielded balance first —
-funded payers pay note-to-note with nothing public, first-time payers get
-deposit and transfer bundled atomically. When that deposit would equal the
-payment and publish it, the router flags it and offers to over-fund so the
-public leg no longer states what was paid.
+- **Live:** https://whisperpay.vercel.app
+- **Mainnet proof:** [three pool transactions](#mainnet-proof), all
+  `ACCEPTED_ON_L1`
+- **Tests:** 84, no external dependencies — `npm test`
 
-That decision is made in [`planPayment`](src/lib/strk20/plan.ts) and shown to
-the payer before they sign, as a privacy meter that quotes this transaction's
-own numbers rather than a generic disclaimer
-([`assessPrivacy`](src/lib/strk20/privacy.ts)). Both are covered by tests —
-`npm test`.
+## The problem, precisely
 
-Two honest limits, stated here because they're easy to overclaim:
+Routing a payment through a privacy pool is not the same as making it private.
+Here is the failure a naive integration ships with:
 
-- **Over-funding is offered, not forced.** It rounds the deposit up to the next
-  10 STRK, deterministically — not randomly — and the payer chooses. When the
-  amount is already a multiple of 10 the rounding changes nothing, and the app
-  keeps the warning up rather than pretending otherwise.
-- **It narrows, it doesn't erase.** A 20 STRK deposit followed by a transfer
-  still bounds the payment at "at most 20". Shielding ahead of time, unlinked in
-  time from any payment, is the only route that publishes nothing at all — and
-  it's the route the app takes whenever the payer is already funded.
+A payer opens your link and has never used the pool. To pay, their wallet must
+first **deposit** funds into it — and a deposit is public, carrying their
+address and its amount. The private transfer follows in the same transaction.
 
-## What is this?
+If that deposit is for exactly the amount you asked for, then anyone watching
+the pool reads the amount off the public leg and ties it to your transfer by
+timing. The payment is nominally private and effectively published. The pool did
+its job; the integration gave it away.
 
-Whisper Pay is a one-link private payment request tool built on STRK20. A user generates a shareable payment link (similar to PayPal.me); when the payer clicks and pays through the link, the transfer is routed through STRK20's shielded flow so the amount and sender/receiver details stay private on-chain, while the recipient can still view their own incoming payments.
+Whisper Pay detects that case before the payer signs, in
+[`planPayment`](src/lib/strk20/plan.ts), and offers to break the equality by
+rounding the deposit up — the surplus stays in the payer's shielded balance
+rather than being spent. `revealsAmount` is a field on the returned plan, not an
+afterthought, and [`privacy.test.ts`](src/lib/strk20/privacy.test.ts) holds it
+to that in both directions: it must be flagged when deposit equals payment, and
+must stop being flagged once rounding breaks the equality.
 
-## Why
+Two honest limits, because this is easy to overclaim:
 
-On a public chain, every payment link normally leaks the full picture: who paid, how much, and when. That's fine for a public tip jar, but not for freelancers, small businesses, or anyone who just doesn't want their payment history sitting in plain sight forever. Whisper Pay keeps the convenience of a shareable payment link while routing the actual transfer through STRK20's shielded pool, so the amount and the parties involved stay private on-chain.
+- **Rounding is offered, not forced**, and it is deterministic — the next
+  multiple of 10 STRK, not a random figure. When the amount is already a
+  multiple of 10, rounding changes nothing and the app keeps the warning up
+  rather than pretending it helped.
+- **It narrows, it doesn't erase.** A 20 STRK deposit still bounds the payment
+  at "at most 20". Shielding ahead of time, unlinked in time from any payment,
+  is the only route that publishes nothing — and it is the route the app takes
+  automatically whenever the payer is already funded.
+
+## What's hidden, what isn't
+
+| | Hidden | Visible on-chain |
+| --- | --- | --- |
+| Paying from an existing shielded balance | amount, payer, recipient — the whole payment | nothing |
+| Paying with an empty balance (deposit + transfer) | the transfer: amount, payer, recipient | the **deposit**: payer's address, token, deposited amount |
+| Withdrawing to a public address | which shielded notes it came from | recipient address and amount |
+| The payment link itself | — | not on-chain, but the URL **is** the invoice: amount, recipient, memo |
+| The status link `/s/<id>` | amount, token, both parties, memo, transaction | one word — unpaid or received — and the date |
+| The recipient's dashboard | read locally with their own viewing key; never sent to a server | nothing |
+| A signed receipt | amount, token, payer — none are in the signed payload | the request id, the claim, the time, the recipient's address |
+
+The second row is the one that matters, and the reason for the section above.
 
 ## How it works
 
-1. Sender creates a payment request and gets a shareable link
-2. Payer opens the link, connects their Starknet wallet
-3. Payment is shielded and sent through the STRK20 privacy pool
-4. Recipient sees the incoming payment reflected in their private balance — no public trace of amount or counterparties
+**1. The link carries the request.** Creating one writes nothing to a database
+— recipient, amount and memo are encoded into the URL by
+[`codec.ts`](src/lib/request/codec.ts). There is no server-side table of who
+billed whom, because there is no server-side table.
 
-## Stack
-
-Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · starknet.js v10 ·
-get-starknet (Wallet Standard) · STRK20 Privacy Wallet API · Starknet ID ·
-Zustand · Upstash Redis
-
-**No custom Cairo contracts, nothing deployed.** Every pool operation — deposit,
-transfer, withdraw — is composed as STRK20 actions and submitted through the
-user's wallet via `strk20InvokeTransaction`. Starknet ID resolution calls the
-mainnet naming contract read-only through the app's own RPC. The only server
-dependency is a Redis for request status — needed on serverless, where each
-function has its own memory, and payment works without it either way.
-
-## Goal for the sprint
-
-Ship a minimal but fully working mainnet flow:
-
-`generate link → connect wallet → shield & send payment → recipient sees private balance update`
-
-## Roadmap
-
-Following [Private Sprint (STRK20)](https://strk20.starknet.io/hackathon), Aug 14–31.
-
-* ✅ **M1:** payment request object + shareable link + shield-to-pay flow
-* ✅ **M2:** paid-detection + private balance dashboard (viewing key)
-* ✅ **M3:** unshield ("withdraw to spend") + pay-by-identifier lookup (Starknet ID)
-* ✅ **M4:** recurring payment requests (subscriptions / repeat invoices)
-* ✅ **M5:** stretch — public status page per link (paid / pending) without revealing amount or parties
-* ✅ **M6:** stretch — [signed receipts](#signed-receipts) the recipient issues and anyone can check
-
-## Signed receipts
-
-A recipient can hand someone a receipt: "request X was paid", signed by the
-account the request was addressed to. Generate one from the dashboard on a paid
-request; anyone can check it at `/verify-receipt`, from their own browser,
-against the account contract on mainnet. No Whisper Pay server is consulted, and
-none could change the answer.
-
-**It is a signed receipt, not a proof of payment.** What a verifier learns is
-that whoever holds that account's key asserted a specific sentence about a
-specific request id, at a specific time, and cannot later deny doing so. That is
-the trust model of a signed paper receipt — non-repudiable, and worth exactly
-what the signer's word is worth.
-
-It is **not** a zero-knowledge proof and must never be described as one. Proving
-"a transfer of at least X reached my address" without revealing X means proving
-statements about the pool's note commitments, which needs a custom Cairo
-circuit, a verifier contract and prover integration. Whisper Pay is wallet-only
-and never touches note internals or the viewing key, so that claim isn't ours to
-make.
-
-Two limits are built into the format rather than only written here:
-
-* **It cannot name the payer.** The pool hides the sender from everyone, the
-  recipient included. A receipt says "request X was paid"; it can never say who
-  paid it, and no field carries a payer.
-* **The amount is deliberately excluded from the signed payload.** Not hidden
-  from display — absent from what gets signed, so a receipt cannot be made to
-  imply an amount, and `receipt.test.ts` fails if a field ever sneaks in.
-
-And a limit no format can fix: **this is for cooperative use only.** Showing an
-accountant or a client that a request was fulfilled is the use case. It is
-useless in an adversarial dispute, because the recipient is the party being
-disputed and simply won't sign a receipt that hurts their case. The verification
-page says so to whoever is reading a receipt, not just here.
-
-Mechanically: SNIP-12 revision 1 typed data signed through `wallet_signTypedData`,
-verified with `verifyMessageInStarknet`, which calls `is_valid_signature` on the
-signer's account contract — so any account implementation works, not only
-plain Stark-curve keys.
-
-## Status
-
-M1–M6 are built and running against mainnet infrastructure. `strk20.json` holds
-three verified mainnet pool transactions and the deployment URL. Still to do: a
-demo video.
-
-## Run it
-
-```bash
-npm install
-npm run dev          # http://localhost:3000
-npm test             # routing, privacy, address and receipt tests — no extra dependencies
-```
-
-No configuration needed — it defaults to a public mainnet RPC. Copy
-`.env.example` to `.env.local` for your own RPC or a durable status store; every
-value there is optional.
-
-You need a Starknet wallet with STRK20 support, on **mainnet** —
-[Ready](https://www.ready.co/) and [Xverse](https://www.xverse.app/) support it
-today. Registering with the pool and shielding both happen **inside the wallet**:
-it holds the viewing key, so no dapp can do either on your behalf.
-
-### How the payment is routed
-
-Before showing a Pay button, the app reads the payer's shielded balance and
-picks a route ([`src/lib/strk20/plan.ts`](src/lib/strk20/plan.ts)):
+**2. The route is chosen from the payer's shielded balance.**
+[`planPayment`](src/lib/strk20/plan.ts):
 
 | Payer's state | Actions submitted | What's public |
 | --- | --- | --- |
 | Funded in the pool | `[transfer]` | nothing |
-| Not funded | `[deposit, transfer]` — one atomic tx | the deposit only |
+| Not funded | `[deposit, transfer]` — one atomic transaction | the deposit only |
 
-The second route is what lets someone pay a link having never used the pool.
-Both actions go to the wallet as a single `strk20InvokeTransaction`, so they
-settle together or not at all.
+Both actions reach the wallet as a single `strk20InvokeTransaction`, so they
+settle together or not at all. The second route is what lets someone pay a link
+having never touched the pool before.
 
-When the deposit would exactly equal the payment — the zero-balance case — the
-amount is effectively published and linked to the transfer by timing. The app
-detects this and offers to round the deposit up; the surplus stays shielded.
+**3. The Privacy Risk Meter shows that decision before signing.**
+[`assessPrivacy`](src/lib/strk20/privacy.ts) turns the plan into a claim
+specific enough to check against the numbers on the same screen — "the deposit
+is rounded up to 20 STRK, so the public leg says 20 STRK shielded, not what you
+paid" — rated `strong`, `moderate` or `weak`. It adds no routing logic of its
+own; every branch reads a decision `planPayment` already made. It separately
+flags an amount specified to four or more decimal places, which stops looking
+like a price and starts looking like a serial number — advice, never a blocker.
 
-Whichever route applies, the payer sees it before they sign. A privacy meter on
-the payment page states what *this* transaction publishes, quoting its own
-numbers — "the deposit is rounded up to 20 STRK, so the public leg says 20 STRK
-shielded, not what you paid" — so the claim can be checked against the figures
-directly above it. It also flags an amount precise enough to identify itself
-— four decimal places or more, past which a figure stops looking like a price
-and starts looking like a serial number — as advice rather than a blocker. The wording comes from
-[`assessPrivacy`](src/lib/strk20/privacy.ts), which adds no routing logic of its
-own — every branch reads a decision `planPayment` already made.
+**4. Status is one bit, and the transaction hash is not kept.** When a payment
+is reported, the server verifies the hash on-chain — it exists, it succeeded, it
+emitted a pool event ([`verify.ts`](src/lib/strk20/verify.ts)) — and then
+discards it. Keeping it would undo the point: for a payer who had to shield
+first, that hash leads straight to their public deposit, and a status record is
+readable by anyone holding the id. What survives is
+`{id, status, submittedAt?, confirmedAt?}` and nothing else.
 
-[**docs/PRIVACY.md**](docs/PRIVACY.md) has the full accounting of what is and
-isn't hidden, and what "received" is and isn't evidence of.
+That is a claim the code has to keep on two sides, so both are tested.
+[`status-privacy.test.ts`](src/lib/request/status-privacy.test.ts) fails the
+build if a hash-shaped field reappears in the record type or the route — the
+writing side. [`record.test.ts`](src/lib/store/record.test.ts) covers the
+reading side: a stored record is rebuilt from the four permitted fields rather
+than cast, so a record written by an older version — one that *did* keep the
+hash — cannot carry it back out during the days before it expires.
 
-### Recurring requests
+**5. Signed receipts, framed for what they are.** A recipient can sign "request
+X was paid" with the account the request was addressed to, and hand the artifact
+to an accountant or a client. Anyone can check it at `/verify-receipt` — in
+their own browser, against the account contract on mainnet, with no Whisper Pay
+server consulted and none able to change the answer.
 
-A link can repeat — weekly, fortnightly, monthly, with an end after *n* payments
-or none at all. One link covers the whole subscription: each period it presents
-that period's installment, and the payer approves it in their wallet.
+It is a **signed receipt, not a proof of payment**, and never a zero-knowledge
+proof. What a verifier learns is that whoever holds that account's key asserted
+a specific sentence about a specific request id, and cannot later deny it —
+exactly the trust model of a signed paper receipt. Two limits are built into the
+format rather than only written here:
 
-It can't be otherwise. Every private transfer is a proof generated inside the
-payer's wallet, so a link that charged on its own would need their key sitting on
-a server. Nothing here does. "Cancelling" is just not paying the next one — the
-recipient's side of it is to stop sharing the link.
+- **It cannot name the payer.** The pool hides the sender from everyone, the
+  recipient included.
+- **The amount is absent from the signed payload** — not hidden from display,
+  absent. [`receipt.test.ts`](src/lib/request/receipt.test.ts) serialises the
+  typed data and fails if the words `amount`, `token`, `payer`, `sender` or
+  `txhash` appear anywhere in it.
 
-Each installment carries its own status, so the dashboard shows the period
-that's currently due rather than the first one ever paid, and a payer reopening
-the link is told if this period already looks settled. Months are calendar
-months: the 31st bills on the 28th in February and back on the 31st in March,
-without drifting ([`src/lib/request/schedule.ts`](src/lib/request/schedule.ts)).
+And one no format can fix: it is **for cooperative use only**. In a dispute the
+recipient is the party being disputed, and simply won't sign a receipt that
+hurts their case. The verification page tells its reader so.
 
-Repetition has a privacy cost of its own — a shield-per-payment cadence is a
-strong fingerprint even when every transfer stays hidden. `docs/PRIVACY.md`
-covers it and what to do instead.
+## What's actually distinctive
 
-### Your dashboard, and why a request can be missing from it
+Measured against a baseline STRK20 payment app, four things:
 
-`/dashboard` shows your shielded balance and the requests this browser knows
-about. That second half is the part worth explaining: the list lives in
-localStorage, not on a server, because a request is entirely contained in its
-link and a server-side copy would be a list of who billed whom — the one record
-this app is built not to keep.
+- **Correlation detection with an opt-in fix.** `planPayment` returns
+  `revealsAmount` and offers deterministic over-funding. Most integrations
+  deposit the exact shortfall and publish the amount without noticing.
+- **The meter is pre-signature UI, not a backend decision.** The payer sees what
+  this specific transaction will publish, quoting its own figures, while they
+  can still change it.
+- **A receipt format that is provably narrow.** The exclusion of amount, payer
+  and token from the signed payload is enforced by a test, so it cannot regress
+  into a marketing claim.
+- **A correctness bug fixed with a regression test behind it.** A Starknet
+  address arrives padded to 64 hex digits from a wallet and unpadded from a
+  link; comparing the two as strings locked a recipient out of signing a receipt
+  for their own request. Every comparison now goes through `sameAddress`, and
+  [`address.test.ts`](src/lib/strk20/address.test.ts) pins the real
+  padded/unpadded pair for the account in the transactions below.
 
-The cost is that the list doesn't follow you between browsers, and it bites in a
-specific case: you make a link on one machine and open your wallet on another,
-so the side being paid can't see the request at all. Opening the payment link
-with the recipient's wallet connected offers **Add to my dashboard**, which
-copies it into that browser. Nothing is sent anywhere; the offer only appears
-for the account the money is addressed to.
+  A second fix has no test and is listed here without one: history pruning
+  deleted entries whose date it could not read, so it now removes only what it
+  can positively identify as expired ([`history.ts`](src/lib/request/history.ts)).
 
-Requests are dropped from the list after seven days — a live subscription
-excepted, since it's meant to be reopened each period.
+## Milestones
 
-A request still showing as unpaid carries **Mark received**, for money that
-arrived without a report: a payer who paid straight from their wallet, or
-reported it from a tab that never finished loading. It's your own judgement,
-made after looking at your shielded balance; nothing checks it, because nothing
-can.
+Following [Private Sprint (STRK20)](https://strk20.starknet.io/hackathon), Aug 14–31.
 
-### The status link
+* ✅ **M1** — payment request object, shareable link, shield-to-pay flow
+* ✅ **M2** — paid detection + private balance dashboard (viewing key)
+* ✅ **M3** — unshield ("withdraw to spend") + pay-by-identifier via Starknet ID
+* ✅ **M4** — recurring requests (subscriptions / repeat invoices)
+* ✅ **M5** — stretch: public status page per link, no amount and no parties
+* ✅ **M6** — stretch: signed receipts anyone can verify
 
-Every request comes with a second link, `/s/<id>`, and the difference between
-the two is the point. The payment link *is* the invoice: it carries the amount,
-the recipient and the note, so sharing it to prove you were paid shares all of
-that too. The status link carries a request id — 72 random bits that describe
-nothing — and renders one fact: unpaid or received.
+## Architecture
 
-That page can be as thin as it is because the record behind it is. The payer's
-transaction hash is verified when reported and then **discarded rather than
-stored**: for someone who shielded in order to pay, that hash leads straight to
-a public deposit with their address on it, and status is readable by anyone
-holding the id. So the server keeps a lifecycle state and two timestamps, and
-that is the whole of it.
+**Wallet-based. No custom Cairo contract, nothing deployed by us.** Every pool
+operation — deposit, transfer, withdraw — is composed as STRK20 actions and
+submitted through the user's own wallet via `strk20InvokeTransaction`.
 
-A record expires after seven days, the same window the browser keeps its own
-history for, so a request and its status disappear together rather than leaving
-a status page for an invoice nobody can produce.
+That is a deliberate integration choice, not a shortcut. The viewing key and the
+SNIP-36 proof both belong inside the wallet; a dapp that wanted to touch note
+internals would need the user's key on a server, which is the thing this
+category exists to avoid. Staying wallet-side means there is no contract of ours
+to audit, no privileged key, and nothing to trust beyond the pool itself.
 
-Recurring links carry their schedule in the URL, so the page shows "payment 3 of
-12" and the recent periods — cadence and length, still no amount and no parties.
+```
+src/
+  app/
+    page.tsx                  create a request
+    pay/[id]/                 the payer's view — routing, meter, submit
+    dashboard/                shielded balance, your links, receipts
+    s/[id]/                   public status page (one bit, self-refreshing)
+    verify-receipt/           check a receipt, in the reader's own browser
+    api/
+      requests/               encode a request into a link
+      resolve/                Starknet ID → address
+      status/[id]/            report a payment, read status
+  lib/
+    strk20/plan.ts            routing + correlation detection
+    strk20/privacy.ts         the Privacy Risk Meter's wording
+    strk20/verify.ts          on-chain check of a reported transaction
+    strk20/constants.ts       pool/token config, address normalization
+    request/codec.ts          link encode/decode
+    request/receipt.ts        SNIP-12 receipt format
+    request/schedule.ts       calendar-month recurrence
+    request/history.ts        browser-local list of your links
+    store/index.ts            status store (Upstash Redis over REST)
+    store/record.ts           what a stored record may contain on the way out
+```
 
-### Getting to mainnet
+## Stack
 
-Done for this entry, and the same path for anyone reproducing it:
+Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · starknet.js v10.4 ·
+get-starknet (Wallet Standard) · STRK20 Privacy Wallet API · Starknet ID ·
+Zustand · Upstash Redis
 
-- [x] [Ready](https://www.ready.co/) or [Xverse](https://www.xverse.app/), switched to mainnet
-- [x] Some mainnet STRK — a few is enough for all three transactions
-- [x] **Register with the pool from the wallet's privacy section.** One
-      transaction, done once; nothing can be sent to you privately until you do
-- [x] **Shield some STRK in the wallet**, so the first payment runs the
-      already-funded route. (Paying with an empty shielded balance also works —
-      Whisper Pay shields and pays in one transaction — but then the deposit is
-      public, so shield ahead of time if you care about that.)
-- [x] Use Whisper Pay end to end: create a link, pay it, withdraw — three pool transactions
-- [x] `node scripts/strk20-json.mjs <hashes>` records them, running the same
-      on-chain check the judging panel does so an ineligible hash never gets written
-- [ ] A demo video, recorded and set with `--video`
+## Run it yourself
+
+```bash
+git clone https://github.com/bugsm/whisperpay.git
+cd whisperpay
+npm install
+npm run dev      # http://localhost:3000
+npm test         # 84 tests, node:test, no extra dependencies
+npm run build    # production build
+```
+
+No configuration is required to run it — it defaults to a public mainnet RPC and
+an in-memory status store.
+
+For a real deployment, copy `.env.example` to `.env.local`:
+
+| Variable | Needed? | Why |
+| --- | --- | --- |
+| `UPSTASH_REDIS_REST_URL` + `_TOKEN` | **yes on serverless** | without it the status store is process memory, and on Vercel the API route and the status page are separate functions with separate memory. `KV_REST_API_*` is read too. |
+| `NEXT_PUBLIC_RPC_URL` | recommended | the public default rate-limits, and receipt polling is chatty |
+| `NEXT_PUBLIC_APP_URL` | only behind a custom domain | otherwise forwarded headers are used, correct on Vercel out of the box |
+
+To use it against mainnet you need a wallet with STRK20 support —
+[Ready](https://www.ready.co/) or [Xverse](https://www.xverse.app/) — switched
+to mainnet, and registered with the pool. **Registering and shielding both
+happen inside the wallet**: it holds the viewing key, so no dapp can do either
+on your behalf.
+
+## Mainnet proof
+
+Three real STRK20 pool transactions, each verified by
+[`scripts/strk20-json.mjs`](scripts/strk20-json.mjs) — the same check the
+judging panel runs — and recorded in [`strk20.json`](strk20.json). All three are
+`ACCEPTED_ON_L1` with 4 pool events each.
+
+| # | Transaction |
+| --- | --- |
+| 1 | [`0x6f3417cb…557ede`](https://voyager.online/tx/0x6f3417cba37b8f2faa352f4300f561717d80a33eeaf8bbc2e985fa6e1557ede) |
+| 2 | [`0x5875580f…fb2ba9`](https://voyager.online/tx/0x5875580f10aec7c0d90fcf531908f14323caad0685842b8515282c0fcfb2ba9) |
+| 3 | [`0x568f522b…8c2c4c`](https://voyager.online/tx/0x568f522b9c66714afd2b7f7bbb614ef78749510d49bce015bd16add408c2c4c) |
+
+Re-check them yourself:
+
+```bash
+node scripts/strk20-json.mjs --check
+```
+
+## Status, and what's left
+
+M1–M6 are built and running against mainnet. The app is deployed, the three
+transactions are verified and recorded.
+
+**Still open before the deadline:**
+
+- [ ] **Demo video (≤3 min)** — the one remaining requirement for scoring.
+      `node scripts/strk20-json.mjs --video <url>` records it.
+
+**Known limits, stated rather than hidden:**
+
+- The signed-receipt flow has been verified against the account contract on
+  mainnet, but a wallet has not yet produced a receipt signature end to end —
+  `wallet_signTypedData` is the one path exercised only by its types.
+- A status record lives 7 days, and the browser-local list of your links prunes
+  on the same schedule. Long-running subscriptions are exempt.
+- `submitted` remains in the status type for records written before payments
+  settled on verification alone. Nothing writes it now.
+
+## Docs
+
+- [**docs/PRIVACY.md**](docs/PRIVACY.md) — the full accounting of what is and
+  isn't hidden, what "received" is and isn't evidence of, and the privacy cost
+  of a recurring shield-per-payment cadence.
 
 ## Team
 
