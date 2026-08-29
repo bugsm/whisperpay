@@ -194,6 +194,22 @@ export interface ScanInput {
 export const MAX_DINERS_LENGTH = 2000;
 
 /**
+ * The JSON out of an answer that may have been dressed up as markdown.
+ *
+ * Only reachable on the schema-less fallback path: with `output_config` the
+ * API returns bare JSON, and asking in words gets a ```json fence often enough
+ * to be worth handling rather than failing on. Untouched when there is no
+ * fence, so the enforced path costs nothing.
+ *
+ * Strips the fence only. Everything about the contents is still decided by
+ * `parseNota`.
+ */
+function unfence(text: string): string {
+  const fenced = text.trim().match(/^```(?:json)?\s*\n([\s\S]*?)\n?```$/);
+  return fenced ? fenced[1] : text;
+}
+
+/**
  * The model's answer as text, whatever envelope it arrived in.
  *
  * `content` is a list of blocks in the API's contract, and that is the only
@@ -260,15 +276,38 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
     );
   }
 
-  let response: Anthropic.Message;
-  try {
-    response = await client.messages.create({
-      model: process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_MODEL,
+  const model = process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_MODEL;
+
+  /**
+   * One attempt at the request.
+   *
+   * `schema` is what varies, because `output_config` is the parameter a gateway
+   * standing in for this API is most likely not to implement. With it, the
+   * shape is enforced by the API; without it, the shape is asked for in words
+   * and enforced by `parseNota` — which rebuilds the receipt field by field
+   * either way. What the fallback gives up is reliability of format, not any
+   * check on what comes back.
+   */
+  function ask(schema: boolean) {
+    // The note is fenced and labelled as the diners' words. It is whatever the
+    // organiser typed, so it is data the model reads about, never instructions
+    // it takes from — the rules for reading it are in the system prompt, above
+    // this and out of reach of anything typed into the box.
+    const task = diners
+      ? `Read this receipt. Return every line item with its printed total, and fill in "shares" from the note below.\n\nThe diners' note, as written:\n<note>\n${diners}\n</note>`
+      : "Read this receipt. Return every line item with its printed total.";
+
+    return client.messages.create({
+      model,
       max_tokens: MAX_TOKENS,
       system: SYSTEM,
-      output_config: {
-        format: { type: "json_schema", schema: OUTPUT_SCHEMA },
-      },
+      ...(schema
+        ? {
+            output_config: {
+              format: { type: "json_schema" as const, schema: OUTPUT_SCHEMA },
+            },
+          }
+        : {}),
       messages: [
         {
           role: "user",
@@ -283,19 +322,34 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
             },
             {
               type: "text",
-              // The note is fenced and labelled as the diners' words. It is
-              // whatever the organiser typed, so it is data the model reads
-              // about, never instructions it takes from — the rules for
-              // reading it are in the system prompt, above this and out of
-              // reach of anything typed into the box.
-              text: diners
-                ? `Read this receipt. Return every line item with its printed total, and fill in "shares" from the note below.\n\nThe diners' note, as written:\n<note>\n${diners}\n</note>`
-                : "Read this receipt. Return every line item with its printed total.",
+              text: schema
+                ? task
+                : `${task}\n\nReply with a single JSON object and nothing else — no prose, no markdown fence. It must match this JSON Schema exactly:\n${JSON.stringify(OUTPUT_SCHEMA)}`,
             },
           ],
         },
       ],
     });
+  }
+
+  let response: Anthropic.Message;
+  try {
+    try {
+      response = await ask(true);
+    } catch (error) {
+      // `output_config` is the parameter a gateway is likeliest to reject, and
+      // it does so as a plain 400 that tells the person holding the receipt
+      // nothing. So a 400 is tried once more without it — but only where a
+      // gateway is actually configured, because Anthropic implements the
+      // parameter and a 400 from there means something this retry can't fix.
+      if (!(error instanceof Anthropic.BadRequestError) || !endpoint()) throw error;
+
+      console.error(
+        "[nota] retrying without output_config:",
+        JSON.stringify({ host: host(), model, status: error.status })
+      );
+      response = await ask(false);
+    }
   } catch (error) {
     // The SDK's typed classes, most specific first — never the text of a
     // message, which is not a contract.
@@ -326,6 +380,24 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
       );
     }
     if (error instanceof Anthropic.APIError) {
+      // The catch-all of the chain, and so the one that used to say least
+      // while covering most: a rejected model name, a rejected parameter, an
+      // exhausted balance and an upstream outage all arrived here as the same
+      // sentence with nothing written down. The status and the upstream's own
+      // message are what tell those apart.
+      //
+      // The message is the *response* body, never the request — the SDK does
+      // not echo what was sent — so the photo cannot appear in it. Truncated
+      // regardless, because that guarantee is better held by construction.
+      console.error(
+        "[nota] the upstream refused:",
+        JSON.stringify({
+          host: host(),
+          model,
+          status: error.status,
+          message: error.message.slice(0, 500),
+        })
+      );
       throw new NotaUpstreamError(
         "Receipt scanning is unavailable right now. You can still type the lines in by hand."
       );
@@ -357,7 +429,7 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(unfence(text));
   } catch {
     throw new NotaOutputError("The scanner's answer wasn't readable.");
   }
