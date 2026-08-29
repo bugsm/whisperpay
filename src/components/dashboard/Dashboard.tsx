@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import Badge from "@/components/ui/Badge";
+import Panel from "@/components/ui/Panel";
+import { CARD_SURFACE } from "@/components/ui/surfaces";
 import ConnectWallet from "@/components/wallet/ConnectWallet";
 import { useWallet, type WalletState } from "@/components/wallet/walletStore";
 import { AmountError, formatDisplay, parseUnits } from "@/lib/amount";
@@ -168,7 +171,7 @@ function BalanceCard({
   onRefresh: () => void;
 }) {
   return (
-    <section className="rounded-2xl border border-hairline bg-surface p-6">
+    <section className={CARD_SURFACE}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-medium tracking-wide text-muted uppercase">
@@ -264,7 +267,7 @@ function WithdrawCard({
   return (
     <form
       onSubmit={withdraw}
-      className="rounded-2xl border border-hairline bg-surface p-6"
+      className={CARD_SURFACE}
     >
       <h2 className="text-sm font-semibold">Withdraw to spend</h2>
       <p className="mt-1 text-sm text-muted">
@@ -373,7 +376,11 @@ function RequestList() {
   // stale on its own. Poll while the tab is visible, and re-read the moment it
   // becomes visible again rather than making someone wait out an interval.
   useEffect(() => {
-    if (entries.length === 0) return;
+    // A bill is several requests under `<id>-<n>`, so there is no single status
+    // to read for one — its own page does the rollup. Polling `<id>` here would
+    // ask for a key nothing ever writes and badge every bill "Unpaid" forever.
+    const tracked = entries.filter((entry) => entry.shares === undefined);
+    if (tracked.length === 0) return;
 
     // Guarded so a slow response for an earlier entry list can't overwrite the
     // statuses of a newer one.
@@ -381,7 +388,7 @@ function RequestList() {
 
     async function read() {
       const results = await Promise.all(
-        entries.map(async (entry) => {
+        tracked.map(async (entry) => {
           try {
             const response = await fetch(`/api/status/${statusKeyFor(entry)}`);
             if (!response.ok) {
@@ -516,7 +523,7 @@ function RequestList() {
 
   if (entries.length === 0) {
     return (
-      <section className="rounded-2xl border border-hairline bg-surface p-6">
+      <section className={CARD_SURFACE}>
         <h2 className="text-sm font-semibold">Your payment links</h2>
         <p className="mt-1 text-sm text-muted">
           Links you create appear here.{" "}
@@ -530,7 +537,7 @@ function RequestList() {
   }
 
   return (
-    <section className="rounded-2xl border border-hairline bg-surface p-6">
+    <section className={CARD_SURFACE}>
       <h2 className="text-sm font-semibold">Your payment links</h2>
       <p className="mt-1 text-xs text-muted">
         Kept in this browser only — Whisper Pay never stores a list of who you
@@ -539,6 +546,19 @@ function RequestList() {
 
       <ul className="mt-4 divide-y divide-[var(--hairline)]">
         {entries.map((entry) => {
+          if (entry.shares !== undefined) {
+            return (
+              <BillRow
+                key={entry.id}
+                entry={entry}
+                onRemove={() => {
+                  removeFromHistory(entry.id);
+                  setEntries(loadHistory());
+                }}
+              />
+            );
+          }
+
           const status = statuses[entry.id] ?? "pending";
           const cycle = entry.schedule
             ? currentInstallment(entry.schedule)
@@ -569,7 +589,7 @@ function RequestList() {
                 </p>
               </div>
 
-              <StatusBadge status={status} />
+              <Badge status={status} />
 
               <div className="flex shrink-0 gap-1.5">
                 <button
@@ -659,6 +679,65 @@ function RequestList() {
         </p>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * A split bill in the list of links this browser made.
+ *
+ * Deliberately quieter than a request row: no badge, no *Mark received*, no
+ * receipt. Each of those is a statement about one obligation, and a bill is
+ * several — the page behind *Open* is where they're answered one line at a
+ * time, with the status of every line read in a single round trip.
+ */
+function BillRow({
+  entry,
+  onRemove,
+}: {
+  entry: HistoryEntry;
+  onRemove: () => void;
+}) {
+  return (
+    <li className="flex items-center gap-3 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="tabular text-sm font-medium">
+          {formatDisplay(BigInt(entry.amount), DEFAULT_TOKEN.decimals)}{" "}
+          {DEFAULT_TOKEN.symbol}
+          {entry.memo ? (
+            <span className="ml-2 font-normal text-muted">{entry.memo}</span>
+          ) : null}
+        </p>
+        <p className="mt-0.5 text-xs text-muted">
+          Split {entry.shares} ways ·{" "}
+          {new Date(entry.createdAt * 1000).toLocaleDateString()}
+        </p>
+      </div>
+
+      <div className="flex shrink-0 gap-1.5">
+        <button
+          type="button"
+          title="Copy the organiser link — it contains every name and amount"
+          onClick={() => void navigator.clipboard.writeText(entry.url)}
+          className="rounded-lg border border-hairline px-2 py-1 text-xs transition hover:bg-surface-raised"
+        >
+          Copy
+        </button>
+        <Link
+          href={entry.path}
+          className="rounded-lg border border-hairline px-2 py-1 text-xs transition hover:bg-surface-raised"
+        >
+          Open
+        </Link>
+        <button
+          type="button"
+          title="Remove from this browser"
+          onClick={onRemove}
+          className="rounded-lg border border-hairline px-2 py-1 text-xs text-muted transition hover:bg-surface-raised"
+        >
+          ×
+        </button>
+      </div>
+    </li>
   );
 }
 
@@ -768,39 +847,3 @@ function ReceiptPanel({
   );
 }
 
-function StatusBadge({ status }: { status: RequestStatus }) {
-  const style: Record<RequestStatus, string> = {
-    pending: "border-hairline text-muted",
-    submitted: "border-amber-400/40 text-amber-300",
-    confirmed: "border-emerald-400/40 text-emerald-300",
-    expired: "border-hairline text-muted line-through",
-  };
-  const label: Record<RequestStatus, string> = {
-    pending: "Unpaid",
-    submitted: "Submitted",
-    confirmed: "Received",
-    expired: "Expired",
-  };
-  return (
-    <span
-      className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs ${style[status]}`}
-    >
-      {label[status]}
-    </span>
-  );
-}
-
-function Panel({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-2xl border border-hairline bg-surface p-6">
-      <h1 className="mb-1 text-lg font-semibold">{title}</h1>
-      {children}
-    </section>
-  );
-}

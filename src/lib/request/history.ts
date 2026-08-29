@@ -57,6 +57,16 @@ export interface HistoryEntry {
   expiresAt?: number;
   /** Present for a recurring request. Entries created before M4 have none. */
   schedule?: Schedule;
+  /**
+   * Number of shares, present only when this entry is a split bill.
+   *
+   * A bill reuses every other field — `path` and `url` point at the organiser
+   * page, `amount` is the computed total, `memo` is the title — because it is
+   * still one thing this browser minted and may want back. What it isn't is one
+   * request: its status lives under `<id>-<n>`, one key per person, so anything
+   * that reads a single status by `id` has to notice this field and step aside.
+   */
+  shares?: number;
 }
 
 function isEntry(value: unknown): value is HistoryEntry {

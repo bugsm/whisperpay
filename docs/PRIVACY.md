@@ -120,12 +120,86 @@ Whisper Pay's backend is deliberately thin.
   public deposit carrying their address, so storing it against a request id
   would rebuild exactly the link the pool exists to break. Status is readable by
   anyone holding the id, which is the other half of the reason.
+- **A split bill adds no server state.** The organiser link carries every name
+  and every share in the URL, exactly as a single request does. Each line is
+  derived into an ordinary payment request, so what the store holds is the same
+  `{id, status, timestamps}` per line and nothing tying the lines together — the
+  "3 of 8 paid" count on the bill page is computed from those records while it
+  renders, and never written anywhere.
+- **A short-linked bill is stored, and stored encrypted.** Choosing the short
+  link is the one action in this app that puts something of yours on the server.
+  What lands there is a ciphertext it has no key for — see the section below.
+- **A receipt photo is read and dropped.** It is sent to the model that reads
+  it and is never written anywhere — see the section below.
 - **The server never sees a viewing key or a private key.** Every pool operation
   goes through the user's wallet via the STRK20 Wallet API.
 
 Whoever hosts the app does see standard web traffic: the fact that an IP opened a
 particular payment link, and — because the request is in the URL path — the
 contents of that link. Self-host if that matters to you.
+
+A bill link raises the stakes of that last point, so it is worth saying plainly:
+opening `/bill/<payload>` shows the host the whole list — every name, every
+share, and the fact that these people ate together. A payer opening their own
+`/pay/<payload>` link reveals only their own line, which is why the organiser
+link is the one to be careful with.
+
+## Short bill links
+
+A bill link carries every line in its own URL, which is what keeps it free of
+the server — and what makes it long enough that some chat apps cut it in half.
+The short link is the opt-in answer, and it is worth being exact about what it
+changes.
+
+`/b/<id>#<key>`. The bill is encrypted **in your browser** with a fresh
+AES-GCM-256 key and a fresh 12-byte IV; the ciphertext is posted and stored
+under a random id; the key is put after the `#`. A URL fragment is never
+transmitted to a server — that is a property of HTTP, not a promise this app is
+making — so the key reaches nobody but the people you send the link to.
+
+What the server holds is therefore bytes with no key: the id, a ciphertext, an
+IV, and an expiry. It does not know how many people are on the bill, what they
+owe, who they are, or that the blob is a bill at all. The route that stores it
+never parses it, and there is no decryption path in the server to add one to.
+
+Three limits, all of them consequences rather than caveats:
+
+- **A short link can die.** It lives `min(expiresAt, 30 days)`, and it is gone
+  if the store is ever lost. The full `/bill/<payload>` link cannot die, which
+  is why it stays the default and this is offered as an extra.
+- **The option disappears without a store.** Where no Redis is configured, the
+  app does not offer a short link and the endpoint refuses to mint one, rather
+  than handing you a link that works once.
+- **Whoever holds the whole link can read the bill.** The key is in it. That is
+  the same standing as the full link — the difference is only where the bytes
+  live, not who can read them.
+
+## Scanning a receipt
+
+Building a bill from a photo sends that photo to Anthropic's API, which reads it
+and returns a list of items and amounts. That is a real disclosure and worth
+stating plainly rather than burying: a receipt carries a place, a time, what was
+ordered, and often the last four digits of a card.
+
+What happens to it here:
+
+- **It is never stored.** Not written to disk, not put in the Redis above, not
+  logged, and not included in any error message. It exists for the length of one
+  request. There is no code path that keeps it, which is a stronger statement
+  than a policy that says it is deleted.
+- **It is never linked to a bill.** The scan and the link-minting are separate
+  steps; nothing associates the image with the bill that comes out of it,
+  because nothing holds the image at all.
+- **It is opt-in and per-bill.** Nothing is scanned unless someone chooses the
+  receipt mode and picks a photo. The other two ways of building a bill send
+  nothing anywhere.
+- **The feature can be switched off entirely.** Without `ANTHROPIC_API_KEY` the
+  option does not appear and the endpoint refuses — a deployment that would
+  rather not send photos to anyone simply doesn't set the key.
+
+The exchange rate used to convert a receipt into STRK comes from a public price
+API. A price is nobody's personal data, and the request carries nothing about
+the bill — only which currency to quote.
 
 ## Names are labels, addresses are what get paid
 

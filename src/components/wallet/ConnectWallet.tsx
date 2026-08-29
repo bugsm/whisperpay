@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from "react";
 import { createStore, type Store } from "@starknet-io/get-starknet-discovery";
 import type { WalletWithStarknetFeatures } from "@starknet-io/get-starknet-wallet-standard/features";
 
+import { buttonClass } from "@/components/ui/Button";
 import { PRIVACY_WALLETS } from "@/lib/strk20/constants";
 import { useWallet } from "./walletStore";
 
@@ -87,17 +88,17 @@ export default function ConnectWallet({
       onClick={() => !isConnecting && setPickerOpen(false)}
     >
       <div
-        className="w-full max-w-sm rounded-2xl border border-hairline bg-[#111119] p-5 shadow-2xl"
+        className="w-full max-w-sm border-2 border-hairline bg-surface p-5 shadow-hard"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Connect a wallet</h2>
+          <h2 className="display text-sm">Connect a wallet</h2>
           <button
             type="button"
             aria-label="Close"
             disabled={isConnecting}
             onClick={() => setPickerOpen(false)}
-            className="rounded-md px-2 text-lg leading-none text-muted transition hover:text-foreground disabled:opacity-40"
+            className="px-2 text-lg leading-none text-muted transition-colors hover:text-foreground disabled:opacity-40"
           >
             ×
           </button>
@@ -111,10 +112,10 @@ export default function ConnectWallet({
                   type="button"
                   disabled={isConnecting}
                   onClick={() => pick(wallet)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-hairline bg-surface px-3 py-3 text-left transition hover:bg-surface-raised disabled:opacity-50"
+                  className="pixel-press flex w-full items-center gap-3 border-2 border-hairline bg-background px-3 py-3 text-left hover:border-accent disabled:opacity-50"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={wallet.icon} alt="" className="size-7 rounded-lg" />
+                  <img src={wallet.icon} alt="" className="pixelated size-7" />
                   <span className="flex-1 text-sm font-medium">{wallet.name}</span>
                   <span className="text-muted">{isConnecting ? "…" : "→"}</span>
                 </button>
@@ -143,7 +144,7 @@ export default function ConnectWallet({
         )}
 
         {error ? (
-          <p className="mt-3 text-xs leading-relaxed text-red-400">{error}</p>
+          <p className="mt-3 text-xs leading-relaxed text-danger">{error}</p>
         ) : null}
       </div>
     </div>
@@ -155,11 +156,11 @@ export default function ConnectWallet({
         type="button"
         onClick={disconnect}
         title="Disconnect"
-        className="group inline-flex items-center gap-2 rounded-full border border-hairline bg-surface px-3 py-1.5 font-mono text-xs transition hover:bg-surface-raised"
+        className="pixel-press group inline-flex items-center gap-2 border-2 border-hairline bg-background px-3 py-1.5 font-mono text-xs hover:border-accent"
       >
-        <span className="size-1.5 rounded-full bg-emerald-400" />
+        <span className="size-1.5 bg-ok" />
         {short}
-        <span className="text-muted transition group-hover:text-foreground">
+        <span className="text-muted transition-colors group-hover:text-foreground">
           Disconnect
         </span>
       </button>
@@ -176,8 +177,8 @@ export default function ConnectWallet({
         }}
         className={
           variant === "primary"
-            ? "w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-[#14101f] transition hover:brightness-110"
-            : "rounded-full border border-hairline bg-surface px-3 py-1.5 text-xs font-medium transition hover:bg-surface-raised"
+            ? `${buttonClass("primary", "lg")} w-full`
+            : buttonClass("secondary", "sm")
         }
       >
         Connect wallet

@@ -2,6 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import LiveStatus from "./LiveStatus";
+import Badge from "@/components/ui/Badge";
+import Card from "@/components/ui/Card";
+import Dot from "@/components/ui/Dot";
+import Row from "@/components/ui/Row";
+import { CARD_SURFACE } from "@/components/ui/surfaces";
 import { decodeSchedule } from "@/lib/request/codec";
 import {
   currentInstallment,
@@ -69,13 +74,13 @@ export default async function StatusPage({
 
   if (!ID_PATTERN.test(id)) {
     return (
-      <Shell>
+      <Card>
         <h1 className="text-lg font-semibold">This status link isn't valid</h1>
         <p className="mt-2 text-sm text-muted">
           It doesn't carry a readable request id.
         </p>
         <HomeLink />
-      </Shell>
+      </Card>
     );
   }
 
@@ -85,14 +90,14 @@ export default async function StatusPage({
   const schedule = encodedSchedule ? decodeSchedule(encodedSchedule) : null;
   if (encodedSchedule && !schedule) {
     return (
-      <Shell>
+      <Card>
         <h1 className="text-lg font-semibold">This status link isn't valid</h1>
         <p className="mt-2 text-sm text-muted">
           Its schedule couldn't be read, so there's no telling which payment it
           means. Ask whoever shared it for a fresh link.
         </p>
         <HomeLink />
-      </Shell>
+      </Card>
     );
   }
 
@@ -126,14 +131,14 @@ export default async function StatusPage({
     );
   } catch {
     return (
-      <Shell>
+      <Card>
         <h1 className="text-lg font-semibold">Status is unavailable</h1>
         <p className="mt-2 text-sm text-muted">
           The status store couldn't be reached. This says nothing about the
           payment itself — paying never goes through this server.
         </p>
         <HomeLink />
-      </Shell>
+      </Card>
     );
   }
 
@@ -142,7 +147,7 @@ export default async function StatusPage({
 
   return (
     <div className="space-y-5">
-      <Shell>
+      <Card>
         <p className="text-xs font-medium tracking-wide text-muted uppercase">
           Payment status
         </p>
@@ -183,10 +188,10 @@ export default async function StatusPage({
             record.
           </p>
         ) : null}
-      </Shell>
+      </Card>
 
       {schedule && periods.length > 1 ? (
-        <section className="rounded-2xl border border-hairline bg-surface p-6">
+        <section className={CARD_SURFACE}>
           <h2 className="text-sm font-semibold">Recent periods</h2>
           <p className="mt-1 text-xs text-muted">
             {paidCount} of the last {periods.length} confirmed received.
@@ -201,14 +206,14 @@ export default async function StatusPage({
                 <span className="ml-auto text-xs text-muted">
                   {formatDate(period.dueAt)}
                 </span>
-                <Badge status={period.status} />
+                <Badge status={period.status} subtle />
               </li>
             ))}
           </ul>
         </section>
       ) : null}
 
-      <section className="rounded-2xl border border-hairline bg-surface p-6">
+      <section className={CARD_SURFACE}>
         <h2 className="text-sm font-semibold">What this page shows</h2>
         <p className="mt-2 text-sm leading-relaxed text-muted">
           Whether a request has been settled, and when — to the day, in UTC. It
@@ -286,13 +291,6 @@ function detailFor(period: Period): string {
   return DETAIL[period.status];
 }
 
-const TONE: Record<RequestStatus, string> = {
-  pending: "text-muted",
-  submitted: "text-amber-300",
-  confirmed: "text-emerald-300",
-  expired: "text-muted",
-};
-
 /** Dates render on the server, so they're pinned to UTC to stay deterministic. */
 function formatDate(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleDateString("en-GB", {
@@ -301,49 +299,6 @@ function formatDate(unixSeconds: number): string {
     month: "short",
     year: "numeric",
   });
-}
-
-function Dot({ status }: { status: RequestStatus }) {
-  const fill: Record<RequestStatus, string> = {
-    pending: "bg-muted/40",
-    submitted: "bg-amber-400 shadow-[0_0_12px] shadow-amber-400/60",
-    confirmed: "bg-emerald-400 shadow-[0_0_12px] shadow-emerald-400/60",
-    expired: "bg-muted/40",
-  };
-  return <span aria-hidden className={`size-3 rounded-full ${fill[status]}`} />;
-}
-
-function Badge({ status }: { status: RequestStatus }) {
-  const label: Record<RequestStatus, string> = {
-    pending: "Unpaid",
-    submitted: "Submitted",
-    confirmed: "Received",
-    expired: "Expired",
-  };
-  return (
-    <span
-      className={`shrink-0 rounded-full border border-hairline px-2.5 py-0.5 text-xs ${TONE[status]}`}
-    >
-      {label[status]}
-    </span>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4">
-      <dt className="shrink-0 text-muted">{label}</dt>
-      <dd className="min-w-0 text-right">{children}</dd>
-    </div>
-  );
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-hairline bg-surface p-6">
-      {children}
-    </section>
-  );
 }
 
 function HomeLink() {

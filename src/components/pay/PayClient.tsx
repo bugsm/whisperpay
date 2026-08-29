@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import Card from "@/components/ui/Card";
+import Notice from "@/components/ui/Notice";
+import Row from "@/components/ui/Row";
 import ConnectWallet from "@/components/wallet/ConnectWallet";
 import { useWallet } from "@/components/wallet/walletStore";
 import { formatDisplay } from "@/lib/amount";
@@ -919,43 +922,3 @@ function formatDateTime(unixSeconds: number): string {
   return `${formatted} UTC`;
 }
 
-function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-hairline bg-surface p-6">
-      {children}
-    </section>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4">
-      <dt className="shrink-0 text-muted">{label}</dt>
-      <dd className="min-w-0 text-right">{children}</dd>
-    </div>
-  );
-}
-
-function Notice({
-  tone,
-  title,
-  children,
-}: {
-  tone: "warn" | "info";
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className={`rounded-xl border p-4 ${
-        tone === "warn"
-          ? "border-amber-400/30 bg-amber-400/5"
-          : "border-hairline bg-surface-raised/40"
-      }`}
-    >
-      <p className="text-sm font-medium">{title}</p>
-      {/* A div rather than a p — callers put buttons inside this. */}
-      <div className="mt-1 text-xs leading-relaxed text-muted">{children}</div>
-    </div>
-  );
-}

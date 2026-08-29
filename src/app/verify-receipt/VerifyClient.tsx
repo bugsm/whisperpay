@@ -10,6 +10,7 @@ import {
   decodeReceipt,
   type Receipt,
 } from "@/lib/request/receipt";
+import { CARD_SURFACE } from "@/components/ui/surfaces";
 import { mainnetProvider } from "@/lib/strk20/provider";
 import { verifyMessageInStarknet } from "starknet";
 
@@ -81,7 +82,7 @@ export default function VerifyClient({ encoded }: { encoded?: string }) {
 
   return (
     <div className="space-y-5">
-      <section className="rounded-2xl border border-hairline bg-surface p-6">
+      <section className={CARD_SURFACE}>
         <h1 className="text-lg font-semibold">Check a signed receipt</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
           Paste a receipt below, or open the link its issuer gave you. The
@@ -114,7 +115,7 @@ export default function VerifyClient({ encoded }: { encoded?: string }) {
         <Result outcome={outcome} />
       </section>
 
-      <section className="rounded-2xl border border-hairline bg-surface p-6">
+      <section className={CARD_SURFACE}>
         <h2 className="text-sm font-semibold">What a receipt does and doesn't show</h2>
 
         <p className="mt-3 text-sm leading-relaxed text-muted">
