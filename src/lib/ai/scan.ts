@@ -160,7 +160,20 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
     throw new NotaConfigError("Receipt scanning isn't configured on this deployment.");
   }
 
-  const client = new Anthropic({ apiKey, baseURL: endpoint() });
+  // Constructed inside a guard because it is the one step that can fail before
+  // any request is made: a malformed ANTHROPIC_BASE_URL throws right here, and
+  // outside a try it left the route with an error carrying no class at all —
+  // reported to the reader as a failure "this server didn't recognise", which
+  // is true and useless.
+  let client: Anthropic;
+  try {
+    client = new Anthropic({ apiKey, baseURL: endpoint() });
+  } catch {
+    console.error("[nota] the endpoint isn't a usable URL:", host());
+    throw new NotaConfigError(
+      "Receipt scanning is misconfigured on this deployment — its endpoint isn't a usable address."
+    );
+  }
 
   let response: Anthropic.Message;
   try {
@@ -237,6 +250,20 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
   if (response.stop_reason === "max_tokens") {
     throw new NotaOutputError(
       "That receipt was too long to read in one go. Split it, or type the lines in by hand."
+    );
+  }
+
+  // `content` is an array in the API's contract, but a gateway standing in for
+  // that API only has to return HTTP 200 — and `.find` on whatever else it
+  // sends throws a TypeError with no class the route can read. Checked rather
+  // than assumed, so a non-conforming upstream arrives as a sentence.
+  if (!Array.isArray(response.content)) {
+    console.error(
+      "[nota] the response had no content array:",
+      JSON.stringify({ host: host(), got: typeof response.content })
+    );
+    throw new NotaOutputError(
+      "The scanner answered in a shape this app doesn't understand."
     );
   }
 

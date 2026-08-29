@@ -123,6 +123,21 @@ export async function POST(request: NextRequest) {
     if (error instanceof NotaScanError) {
       return Response.json({ error: error.message }, { status: 500 });
     }
+    // Nothing in the typed chain matched, so this is a failure the code has no
+    // account of — the one case where the reader is told the least and the
+    // operator needs the most. It went unlogged, which made "didn't recognise"
+    // true of the deployment log as well as of the message.
+    //
+    // Class and message only. The SDK puts the *response* in an error message,
+    // never the request, so the photo cannot appear here — and the message is
+    // cut short anyway, because that guarantee is worth holding by construction
+    // rather than by argument.
+    console.error(
+      "[nota] unrecognised failure:",
+      error instanceof Error
+        ? `${error.constructor.name}: ${error.message.slice(0, 500)}`
+        : typeof error
+    );
     return Response.json(
       { error: "The scan failed for a reason this server didn't recognise." },
       { status: 500 }
