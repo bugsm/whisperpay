@@ -202,9 +202,10 @@ What happens to it here:
 - **It is opt-in and per-bill.** Nothing is scanned unless someone chooses the
   receipt mode and picks a photo. The other two ways of building a bill send
   nothing anywhere.
-- **The feature can be switched off entirely.** Without `ANTHROPIC_API_KEY` the
-  option does not appear and the endpoint refuses — a deployment that would
-  rather not send photos to anyone simply doesn't set the key.
+- **The feature can be switched off entirely.** With neither
+  `ANTHROPIC_API_KEY` nor `ANTHROPIC_AUTH_TOKEN` set, the option does not
+  appear and the endpoint refuses. A deployment that would rather not send
+  photos to anyone simply doesn't set a credential.
 
 The exchange rate used to convert a receipt into STRK comes from a public price
 API. A price is nobody's personal data, and the request carries nothing about

@@ -347,7 +347,7 @@ export default function ScanNota({
             value={note}
             rows={3}
             disabled={busy}
-            placeholder={"udin - ayam, es teh\nadi - ayam 1, es teh 2"}
+            placeholder={"bugsm - chicken, iced tea\neli - chicken 1, iced tea 2"}
             onChange={(event) => setNote(event.target.value)}
             maxLength={MAX_NOTE_LENGTH}
             className="w-full resize-y border-2 border-hairline bg-background px-2 py-1.5 text-sm leading-relaxed outline-none focus:border-accent"

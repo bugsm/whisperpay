@@ -30,16 +30,24 @@ import {
 /**
  * The model this runs on.
  *
- * The strong model, deliberately. This is the one place in the app where a
- * misread digit becomes a real payment request sent to a real person, so
- * accuracy is worth more than the per-scan cost. `claude-haiku-4-5` is the
- * lever if volume ever makes that trade wrong — a decision to take consciously
- * then, not a quiet default now.
+ * Haiku 4.5, chosen deliberately and with the trade named. This is the one
+ * place in the app where a misread digit becomes a real payment request sent
+ * to a real person, and the stronger model reads a creased thermal receipt
+ * more reliably. What buys the downgrade is volume: at roughly a fifth of
+ * Opus's price per scan, a table splitting a bill every week costs cents a
+ * month instead of dollars.
  *
- * `ANTHROPIC_MODEL` overrides it, because a deployment pointed at a gateway
- * (below) reaches models under whatever names that gateway gives them.
+ * `claude-opus-5` is the lever back, and the reason to pull it is accuracy
+ * complaints — lines misread, totals off by a factor of ten — not cost.
+ *
+ * Set here rather than in an env file on purpose: a model chosen in
+ * `.env.local` alone is a model every deployment except this laptop ignores,
+ * and the bill for that shows up in production.
+ *
+ * `ANTHROPIC_MODEL` still overrides it, because a deployment pointed at a
+ * gateway (below) reaches models under whatever names that gateway gives them.
  */
-const DEFAULT_MODEL = "claude-opus-5";
+const DEFAULT_MODEL = "claude-haiku-4-5";
 
 /**
  * Where the request goes.
@@ -55,7 +63,24 @@ const DEFAULT_MODEL = "claude-opus-5";
  * only true while it matches what is deployed.
  */
 function endpoint(): string | undefined {
-  return process.env.ANTHROPIC_BASE_URL?.trim() || undefined;
+  let base = process.env.ANTHROPIC_BASE_URL?.trim();
+  if (!base) return undefined;
+  while (base.endsWith("/")) base = base.slice(0, -1);
+
+  // A trailing `/v1` is dropped, because the SDK adds one. It appends
+  // `/v1/messages` to whatever this returns, so a gateway documented — as most
+  // are, by the OpenAI-compatible convention everyone copies — as
+  // `https://host/v1` is pasted in verbatim and every request then goes to
+  // `/v1/v1/messages`. That answers 404, which reads as a wrong endpoint rather
+  // than a doubled path, while the URL in the dashboard is the one the gateway
+  // documents and correct everywhere else.
+  //
+  // Safe to strip: the messages endpoint lives under `/v1` by definition, so a
+  // base already ending in one is naming the same place twice. A gateway
+  // mounted under a prefix keeps that prefix — only the final `/v1` goes.
+  if (base.endsWith("/v1")) base = base.slice(0, -3);
+
+  return base || undefined;
 }
 
 /**
@@ -247,15 +272,71 @@ function readText(response: Anthropic.Message): string | undefined {
   return undefined;
 }
 
+/**
+ * The credential, and which header it travels in.
+ *
+ * Two conventions meet here. Anthropic authenticates with `x-api-key`, which is
+ * what the SDK sends for `apiKey`. A gateway standing in for it usually wants
+ * the bearer convention instead, and the SDK sends `Authorization: Bearer` for
+ * `authToken` — selected by `ANTHROPIC_AUTH_TOKEN`, the variable those
+ * gateways' own setup instructions hand out. Sending the wrong one of the two
+ * is a 401 that reads exactly like a wrong credential.
+ *
+ * `ANTHROPIC_AUTH_TOKEN` wins when both are set: a deployment that went to the
+ * trouble of setting it means the bearer header, and the other variable is
+ * usually the same string copied twice because an instruction said to.
+ *
+ * Trimmed, and read here rather than left to the SDK's own read of the
+ * environment. A key pasted into a hosting dashboard picks up a trailing
+ * newline more often than not — from a `cat`, from a copied line, from the
+ * textarea itself — and that byte goes straight into the header, where the API
+ * answers 401. The failure then reads as "the credential is wrong" when it is
+ * right and only its whitespace is not.
+ */
+type Credential = { header: "bearer" | "x-api-key"; value: string; raw: string };
+
+function credential(): Credential | undefined {
+  const bearer = process.env.ANTHROPIC_AUTH_TOKEN;
+  if (bearer?.trim()) {
+    return { header: "bearer", value: bearer.trim(), raw: bearer };
+  }
+
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (key?.trim()) {
+    return { header: "x-api-key", value: key.trim(), raw: key };
+  }
+
+  return undefined;
+}
+
+/**
+ * The sentence the upstream actually wrote.
+ *
+ * `error.message` is the SDK's rendering of the response, and for a body whose
+ * top level carries a `message` of its own that rendering is that field — which
+ * on a gateway is the machine code (`UNAUTHENTICATED`) while the sentence a
+ * person can act on sits one level down in `error.error.message`, link to
+ * support and all. Preferring the nested one turns a log line that says nothing
+ * into the only line that says why.
+ *
+ * Falls back to the SDK's own text, which is what Anthropic's own errors want:
+ * their body has no top-level `message` and the rendering is already the
+ * sentence.
+ *
+ * Response body only — the SDK never echoes the request — so the photo cannot
+ * appear here. Truncated regardless, because that guarantee is better held by
+ * construction than by trust.
+ */
+function upstreamMessage(error: InstanceType<typeof Anthropic.APIError>): string {
+  const body = error.error as { error?: { message?: unknown } } | undefined;
+  const nested = body?.error?.message;
+  const text = typeof nested === "string" && nested ? nested : error.message;
+  return text.slice(0, 500);
+}
+
 export async function scanNota(image: ScanInput): Promise<ScannedNota> {
-  // Trimmed, and passed explicitly rather than left to the SDK's own read of
-  // the environment. A key pasted into a hosting dashboard picks up a trailing
-  // newline more often than not — from a `cat`, from a copied line, from the
-  // textarea itself — and that byte goes straight into the `x-api-key` header,
-  // where the API answers 401. The failure then reads as "the key is wrong"
-  // when the key is right and only its whitespace is not.
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) {
+  const auth = credential();
+  if (!auth) {
     throw new NotaConfigError("Receipt scanning isn't configured on this deployment.");
   }
 
@@ -268,7 +349,12 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
   // is true and useless.
   let client: Anthropic;
   try {
-    client = new Anthropic({ apiKey, baseURL: endpoint() });
+    client = new Anthropic({
+      ...(auth.header === "bearer"
+        ? { authToken: auth.value, apiKey: null }
+        : { apiKey: auth.value }),
+      baseURL: endpoint(),
+    });
   } catch {
     console.error("[nota] the endpoint isn't a usable URL:", host());
     throw new NotaConfigError(
@@ -358,20 +444,28 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
       // "the key was refused" alone doesn't tell them which way it is wrong.
       // Shape only — never the key, and never any part of it.
       console.error(
-        "[nota] the API key was refused:",
+        "[nota] the credential was refused:",
         JSON.stringify({
           // The host first: a gateway key sent to `api.anthropic.com` is the
           // likeliest way to arrive here, and it is the one thing the message
           // above cannot distinguish from a key that is simply wrong.
           host: host(),
-          length: apiKey.length,
-          hadSurroundingWhitespace:
-            apiKey.length !== (process.env.ANTHROPIC_API_KEY?.length ?? 0),
-          looksLikeAnAnthropicKey: apiKey.startsWith("sk-ant-api"),
+          // Which header it went in, because sending a gateway's token as
+          // `x-api-key` when it wanted bearer is its own way to arrive here.
+          sentAs: auth.header,
+          length: auth.value.length,
+          hadSurroundingWhitespace: auth.value.length !== auth.raw.length,
+          looksLikeAnAnthropicKey: auth.value.startsWith("sk-ant-api"),
+          // The upstream's own sentence, because a 401 is not always about the
+          // key: a gateway answers one for a refused client, an account out of
+          // balance, or a plan that doesn't carry the model, and the shape
+          // above tells those apart from a wrong key not at all. Response body
+          // only, truncated, same as the branch below.
+          message: upstreamMessage(error),
         })
       );
       throw new NotaConfigError(
-        "Receipt scanning is misconfigured on this deployment — its API key was refused."
+        "Receipt scanning is misconfigured on this deployment — its credentials were refused."
       );
     }
     if (error instanceof Anthropic.RateLimitError) {
@@ -395,7 +489,7 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
           host: host(),
           model,
           status: error.status,
-          message: error.message.slice(0, 500),
+          message: upstreamMessage(error),
         })
       );
       throw new NotaUpstreamError(
