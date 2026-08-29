@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { CARD_SURFACE } from "@/components/ui/surfaces";
 import PayClient, { type PayRequestDto } from "@/components/pay/PayClient";
 import { verifyNameStillResolves, type NameCheck } from "@/lib/identity/starknetid";
 import { decodeRequest, RequestDecodeError } from "@/lib/request/codec";
@@ -52,7 +53,7 @@ export default async function PayPage({ params }: PageProps<"/pay/[id]">) {
     }
   } catch (error) {
     return (
-      <section className="rounded-2xl border border-hairline bg-surface p-6">
+      <section className={CARD_SURFACE}>
         <h1 className="text-lg font-semibold">This payment link isn't valid</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
           {error instanceof RequestDecodeError

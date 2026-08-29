@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import Badge from "@/components/ui/Badge";
+import Panel from "@/components/ui/Panel";
+import { CARD_SURFACE } from "@/components/ui/surfaces";
 import ConnectWallet from "@/components/wallet/ConnectWallet";
 import { useWallet, type WalletState } from "@/components/wallet/walletStore";
 import { AmountError, formatDisplay, parseUnits } from "@/lib/amount";
@@ -168,7 +171,7 @@ function BalanceCard({
   onRefresh: () => void;
 }) {
   return (
-    <section className="rounded-2xl border border-hairline bg-surface p-6">
+    <section className={CARD_SURFACE}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-medium tracking-wide text-muted uppercase">
@@ -264,7 +267,7 @@ function WithdrawCard({
   return (
     <form
       onSubmit={withdraw}
-      className="rounded-2xl border border-hairline bg-surface p-6"
+      className={CARD_SURFACE}
     >
       <h2 className="text-sm font-semibold">Withdraw to spend</h2>
       <p className="mt-1 text-sm text-muted">
@@ -516,7 +519,7 @@ function RequestList() {
 
   if (entries.length === 0) {
     return (
-      <section className="rounded-2xl border border-hairline bg-surface p-6">
+      <section className={CARD_SURFACE}>
         <h2 className="text-sm font-semibold">Your payment links</h2>
         <p className="mt-1 text-sm text-muted">
           Links you create appear here.{" "}
@@ -530,7 +533,7 @@ function RequestList() {
   }
 
   return (
-    <section className="rounded-2xl border border-hairline bg-surface p-6">
+    <section className={CARD_SURFACE}>
       <h2 className="text-sm font-semibold">Your payment links</h2>
       <p className="mt-1 text-xs text-muted">
         Kept in this browser only — Whisper Pay never stores a list of who you
@@ -569,7 +572,7 @@ function RequestList() {
                 </p>
               </div>
 
-              <StatusBadge status={status} />
+              <Badge status={status} />
 
               <div className="flex shrink-0 gap-1.5">
                 <button
@@ -768,39 +771,3 @@ function ReceiptPanel({
   );
 }
 
-function StatusBadge({ status }: { status: RequestStatus }) {
-  const style: Record<RequestStatus, string> = {
-    pending: "border-hairline text-muted",
-    submitted: "border-amber-400/40 text-amber-300",
-    confirmed: "border-emerald-400/40 text-emerald-300",
-    expired: "border-hairline text-muted line-through",
-  };
-  const label: Record<RequestStatus, string> = {
-    pending: "Unpaid",
-    submitted: "Submitted",
-    confirmed: "Received",
-    expired: "Expired",
-  };
-  return (
-    <span
-      className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs ${style[status]}`}
-    >
-      {label[status]}
-    </span>
-  );
-}
-
-function Panel({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-2xl border border-hairline bg-surface p-6">
-      <h1 className="mb-1 text-lg font-semibold">{title}</h1>
-      {children}
-    </section>
-  );
-}

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import Field from "@/components/ui/Field";
+import { CARD_SURFACE } from "@/components/ui/surfaces";
 import { useWallet } from "@/components/wallet/walletStore";
 import { isStarkDomain } from "@/lib/identity/encoding";
 import { saveToHistory } from "@/lib/request/history";
@@ -202,7 +204,7 @@ export default function CreateRequestForm() {
 
   if (created) {
     return (
-      <section className="rounded-2xl border border-hairline bg-surface p-6">
+      <section className={CARD_SURFACE}>
         <h2 className="text-lg font-semibold">
           {created.scheduleLabel
             ? "Your recurring link is ready"
@@ -299,7 +301,7 @@ export default function CreateRequestForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-2xl border border-hairline bg-surface p-6"
+      className={CARD_SURFACE}
     >
       <h2 className="text-lg font-semibold">Request a payment</h2>
       <p className="mt-1 text-sm text-muted">
@@ -483,25 +485,5 @@ function ResolutionHint({
           ? `→ ${resolution.name}`
           : null}
     </p>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-medium tracking-wide text-muted uppercase">
-        {label}
-      </span>
-      {children}
-      {hint ? <span className="mt-1.5 block text-xs text-muted">{hint}</span> : null}
-    </label>
   );
 }
