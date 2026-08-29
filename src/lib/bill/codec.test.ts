@@ -15,6 +15,7 @@ import { describe, it } from "node:test";
 
 import { billPath, decodeBill, encodeBill, BillDecodeError } from "@/lib/bill/codec";
 import { MAX_SHARES, type SplitBill } from "@/lib/bill/types";
+import { RATE_SCALE } from "@/lib/quote";
 import { bytesToBase64Url } from "@/lib/request/codec";
 import { sameAddress, STRK } from "@/lib/strk20/constants";
 
@@ -197,6 +198,12 @@ describe("bill codec refuses what it cannot fully read", () => {
   });
   rejects("rejects a fiat quote with no timestamp", (wire) => {
     wire.p = { c: "IDR", r: "8500" };
+  });
+  // A rate finer than RATE_SCALE parses as a decimal string but not as units,
+  // so accepting it here only moved the throw to the page that renders it —
+  // where `/bill/[id]`'s catch doesn't reach and a 500 is what the reader gets.
+  rejects(`rejects a rate finer than ${RATE_SCALE} places`, (wire) => {
+    wire.p = { c: "IDR", r: "8500.123456789", q: 1787165278 };
   });
 
   rejects("rejects shares that aren't a list", (wire) => {
