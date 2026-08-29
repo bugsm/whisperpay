@@ -458,8 +458,8 @@ export default function ScanNota({
           <strong className="font-medium text-foreground">
             What the links ask for is {DEFAULT_TOKEN.symbol}
           </strong>{" "}
-          — the rupiah figure is context, and it doesn't follow the market after
-          the link is made.
+          — the {quote.currency} figure is context, and it doesn't follow the
+          market after the link is made.
           {isQuoteStale(quote) ? (
             <>
               {" "}

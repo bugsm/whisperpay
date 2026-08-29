@@ -10,7 +10,7 @@ record.
 - **Live:** https://whisperpay.vercel.app
 - **Mainnet proof:** [five pool transactions](#mainnet-proof), all
   `ACCEPTED_ON_L1`
-- **Tests:** 213, no test framework — `npm test`
+- **Tests:** 225, no test framework — `npm test`
 
 ## The problem, precisely
 

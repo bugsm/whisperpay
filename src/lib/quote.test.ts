@@ -16,7 +16,9 @@ import { describe, it } from "node:test";
 import { allocate } from "@/lib/bill/allocate";
 import type { FiatQuote } from "@/lib/bill/types";
 import {
+  CURRENCIES,
   fiatToTokenUnits,
+  findCurrency,
   formatFiat,
   isQuoteStale,
   MAX_QUOTE_AGE_SECONDS,
@@ -158,5 +160,105 @@ describe("the parts equal the whole", () => {
     const converted = fiatToTokenUnits(3n, IDR, DECIMALS);
 
     assert.ok(summed < converted, "the shortfall this ordering avoids");
+  });
+});
+
+/**
+ * The currency table.
+ *
+ * `minorDigits` is the highest-consequence number in `@/lib/quote`: a receipt's
+ * amounts are carried in minor units, so an entry off by one asks everyone for
+ * ten times what they ate. These pin the entries that are easy to get wrong —
+ * the ones that aren't two — and the invariants that hold across all of them.
+ */
+describe("the currency table", () => {
+  it("gives the zero-decimal currencies no minor unit", () => {
+    // ISO says rupiah has two, for a sen that has not been legal tender in
+    // living memory and appears on no receipt. Following the standard here
+    // would inflate every Indonesian bill by a hundred.
+    for (const code of ["IDR", "JPY", "KRW", "VND", "CLP"]) {
+      assert.equal(findCurrency(code)?.minorDigits, 0, code);
+    }
+  });
+
+  it("gives the Gulf dinars three", () => {
+    for (const code of ["BHD", "KWD"]) {
+      assert.equal(findCurrency(code)?.minorDigits, 3, code);
+    }
+  });
+
+  it("gives everything else two", () => {
+    const exceptions = new Set(["IDR", "JPY", "KRW", "VND", "CLP", "BHD", "KWD"]);
+    for (const currency of Object.values(CURRENCIES)) {
+      if (exceptions.has(currency.code)) continue;
+      assert.equal(currency.minorDigits, 2, currency.code);
+    }
+  });
+
+  it("is keyed by its own code, uppercase, and reachable case-insensitively", () => {
+    for (const [key, currency] of Object.entries(CURRENCIES)) {
+      assert.equal(key, currency.code);
+      assert.equal(key, key.toUpperCase());
+      assert.equal(findCurrency(key.toLowerCase())?.code, key);
+    }
+  });
+
+  it("gives every currency something to print in front of an amount", () => {
+    for (const currency of Object.values(CURRENCIES)) {
+      assert.ok(currency.prefix.length > 0, currency.code);
+    }
+  });
+
+  it("has no rate for a currency it doesn't carry", () => {
+    // Not an oversight to be patched at the call site: the price source quotes
+    // a fixed set, and a currency it won't quote can't be converted however
+    // well the photo was read.
+    assert.equal(findCurrency("XYZ"), undefined);
+  });
+});
+
+describe("an amount formats in its own currency's units", () => {
+  it("prints a zero-decimal currency as whole units", () => {
+    assert.equal(formatFiat(12000n, "IDR"), "Rp 12,000");
+    assert.equal(formatFiat(1200n, "JPY"), "¥ 1,200");
+  });
+
+  it("prints a two-decimal currency with its cents", () => {
+    assert.equal(formatFiat(1250n, "USD"), "$ 12.50");
+    assert.equal(formatFiat(800n, "EUR"), "€ 8.00");
+  });
+
+  it("prints a three-decimal currency with all three", () => {
+    assert.equal(formatFiat(12500n, "BHD"), "BHD 12.500");
+  });
+
+  it("falls back to the bare code for a currency it doesn't know", () => {
+    assert.equal(formatFiat(1250n, "XYZ"), "1250 XYZ");
+  });
+});
+
+describe("converting from a currency that isn't rupiah", () => {
+  /** $0.42 per STRK, in cents, at RATE_SCALE. */
+  const USD: FiatQuote = { currency: "USD", rate: "42", quotedAt: 1787165278 };
+
+  it("converts cents at the same scale as rupiah", () => {
+    // $12.50 at $0.42 per STRK is 29.76… STRK, floored.
+    const units = fiatToTokenUnits(1250n, USD, DECIMALS);
+    assert.equal(units, (1250n * 10n ** 18n * 10n ** 8n) / (42n * 10n ** 8n));
+
+    // Back again lands a cent short, and that is the rounding working rather
+    // than failing: both directions floor, so a rate that doesn't divide
+    // evenly loses a fraction each way. It is never made up by rounding one of
+    // them up, which would ask someone for more than the receipt says.
+    const back = tokenUnitsToFiat(units, USD, DECIMALS);
+    assert.equal(back, 1249n);
+    assert.ok(1250n - back <= 1n);
+  });
+
+  it("keeps the parts equal to the whole in a three-decimal currency", () => {
+    const BHD: FiatQuote = { currency: "BHD", rate: "158", quotedAt: 1787165278 };
+    const total = fiatToTokenUnits(12500n, BHD, DECIMALS);
+    const parts = allocate(total, [1n, 1n, 1n]);
+    assert.equal(parts.reduce((sum, part) => sum + part, 0n), total);
   });
 });
