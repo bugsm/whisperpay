@@ -7,7 +7,7 @@ import Notice from "@/components/ui/Notice";
 import { INSET_SURFACE } from "@/components/ui/surfaces";
 import { notaTotals, type ScannedNota } from "@/lib/ai/nota";
 import { allocate } from "@/lib/bill/allocate";
-import type { FiatQuote } from "@/lib/bill/types";
+import { MAX_SHARES, MIN_SHARES, type FiatQuote } from "@/lib/bill/types";
 import {
   fiatToTokenUnits,
   findCurrency,
@@ -39,6 +39,9 @@ import { DEFAULT_TOKEN } from "@/lib/strk20/constants";
  * is exact. See `@/lib/quote`.
  */
 
+/** Matches the route's own cap, so a note is refused here rather than there. */
+const MAX_NOTE_LENGTH = 2000;
+
 /** What the browser sends: a downscaled photo, small enough to post. */
 const MAX_DIMENSION = 1600;
 const JPEG_QUALITY = 0.85;
@@ -56,6 +59,14 @@ interface Draft {
 export interface ScanResult {
   /** Per person, in the token's smallest unit, as decimal strings. */
   amounts: string[];
+  /**
+   * The people these amounts belong to, in the same order.
+   *
+   * Carried rather than assumed, because the note can introduce names the form
+   * has never seen. `amounts[i]` is `names[i]`'s, and the form rewrites its
+   * rows to match rather than trying to line the two up by position.
+   */
+  names: string[];
   /** The rate this was converted at, to travel in the bill payload. */
   quote: FiatQuote;
   /** The merchant, offered as a title. */
@@ -71,21 +82,34 @@ export default function ScanNota({
   onApply: (result: ScanResult) => void;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [assigned, setAssigned] = useState<boolean[][]>([]);
+  const [weights, setWeights] = useState<bigint[][]>([]);
+  /**
+   * The roster the note produced, or `null` when there was no note.
+   *
+   * A note names its own people — "udin - ayam" introduces udin whether or not
+   * a row for him exists — so when there is one it *is* the roster, and the
+   * form's rows are rewritten from it. Without one, the typed rows stay in
+   * charge and this whole mechanism is invisible.
+   */
+  const [names, setNames] = useState<string[] | null>(null);
+  const [note, setNote] = useState("");
   const [quote, setQuote] = useState<FiatQuote | null>(null);
   const [quoteError, setQuoteError] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const roster = names ?? people;
 
   async function handleFile(file: File) {
     setError("");
     setBusy(true);
     try {
       const image = await downscale(file);
+      const diners = note.trim();
       const response = await fetch("/api/nota/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(image),
+        body: JSON.stringify(diners === "" ? image : { ...image, diners }),
       });
       const body = await response.json();
       if (!response.ok) {
@@ -103,7 +127,10 @@ export default function ScanNota({
         discount: nota.discount ?? "",
         total: nota.total ?? "",
       });
-      setAssigned(nota.items.map(() => people.map(() => false)));
+
+      const scannedNames = rosterFrom(nota.items);
+      setNames(scannedNames);
+      setWeights(gridFrom(nota.items, scannedNames ?? people));
       void loadQuote(nota.currency);
     } catch {
       setError("Couldn't read that image in this browser. Try a different photo.");
@@ -158,25 +185,37 @@ export default function ScanNota({
    * change, which is why the form clears a scan whenever a row is added or
    * removed.
    */
-  const grid = (draft?.items ?? []).map((_, i) => fit(assigned[i], people.length));
+  const grid = (draft?.items ?? []).map((_, i) => fit(weights[i], roster.length));
 
-  function setRow(itemIndex: number, next: (row: boolean[]) => boolean[]) {
+  function setRow(itemIndex: number, next: (row: bigint[]) => bigint[]) {
     // Refitted inside the updater rather than from `grid`, so two taps batched
     // into one render can't have the second overwrite the first.
-    setAssigned((current) =>
+    setWeights((current) =>
       (draft?.items ?? []).map((_, i) => {
-        const row = fit(current[i], people.length);
+        const row = fit(current[i], roster.length);
         return i === itemIndex ? next(row) : row;
       })
     );
   }
 
+  /**
+   * Tapping a name is on/off, even though the cell holds a count.
+   *
+   * The count comes from the note — "adi - es teh 2" is a weight of two — and a
+   * tap can only clear it or set it back to one. That is the honest limit of a
+   * chip: there is nowhere on it to say "three", and inventing a stepper would
+   * put a second way to edit quantities next to the note that already does it
+   * better. Turning someone off and on again resets them to one share, and the
+   * chip shows the count so it is never a silent change.
+   */
   function toggle(itemIndex: number, personIndex: number) {
-    setRow(itemIndex, (row) => row.map((on, p) => (p === personIndex ? !on : on)));
+    setRow(itemIndex, (row) =>
+      row.map((share, p) => (p === personIndex ? (share > 0n ? 0n : 1n) : share))
+    );
   }
 
   function everyone(itemIndex: number) {
-    setRow(itemIndex, (row) => row.map(() => true));
+    setRow(itemIndex, (row) => row.map((share) => (share > 0n ? share : 1n)));
   }
 
   /**
@@ -189,6 +228,25 @@ export default function ScanNota({
   function apply() {
     if (!draft || !quote) return;
     setError("");
+
+    // The roster can come from the note, which never went through the form's
+    // add/remove buttons and so was never held to their limits. Checked here,
+    // where the message can name the note as the thing to change — `encodeBill`
+    // would refuse the same bill later with nothing to act on.
+    if (roster.length < MIN_SHARES) {
+      setError(
+        names === null
+          ? `A bill needs at least ${MIN_SHARES} people.`
+          : `Only ${roster.length === 1 ? `"${roster[0]}" was` : "nobody was"} named in the note. A bill needs at least ${MIN_SHARES} people — one person owing you is an ordinary payment request.`
+      );
+      return;
+    }
+    if (roster.length > MAX_SHARES) {
+      setError(
+        `That note names ${roster.length} people, and a bill carries at most ${MAX_SHARES}. Split it into two bills.`
+      );
+      return;
+    }
 
     let items: bigint[];
     try {
@@ -205,7 +263,7 @@ export default function ScanNota({
 
     const unassigned = draft.items
       .map((item, index) => ({ item, index }))
-      .filter(({ index }) => !grid[index]?.some(Boolean));
+      .filter(({ index }) => !grid[index]?.some((share) => share > 0n));
     if (unassigned.length > 0) {
       setError(
         `Nobody is down for ${unassigned
@@ -215,11 +273,14 @@ export default function ScanNota({
       return;
     }
 
-    // Each line split among the people who had it.
-    const perPerson = people.map(() => 0n);
+    // Each line split among the people who had it, in proportion to how many
+    // of it each had. `allocate` takes the weights directly, so "adi - es teh
+    // 2" against "udin - es teh 1" divides the line two-to-one without any
+    // arithmetic happening here — and without the model ever producing a
+    // figure someone is asked to pay.
+    const perPerson = roster.map(() => 0n);
     items.forEach((amount, itemIndex) => {
-      const weights = people.map((_, p) => (grid[itemIndex][p] ? 1n : 0n));
-      allocate(amount, weights).forEach((share, p) => {
+      allocate(amount, grid[itemIndex]).forEach((share, p) => {
         perPerson[p] += share;
       });
     });
@@ -263,6 +324,7 @@ export default function ScanNota({
 
     onApply({
       amounts: units.map((amount) => amount.toString()),
+      names: roster,
       quote,
       title: draft.merchant,
     });
@@ -276,6 +338,28 @@ export default function ScanNota({
           check every number before anything is minted — the photo is sent to be
           read and never stored.
         </p>
+
+        <label className="mt-3 block">
+          <span className="display mb-1 block text-xs tracking-wide text-muted uppercase">
+            Who had what (optional)
+          </span>
+          <textarea
+            value={note}
+            rows={3}
+            disabled={busy}
+            placeholder={"udin - ayam, es teh\nadi - ayam 1, es teh 2"}
+            onChange={(event) => setNote(event.target.value)}
+            maxLength={MAX_NOTE_LENGTH}
+            className="w-full resize-y border-2 border-hairline bg-background px-2 py-1.5 text-sm leading-relaxed outline-none focus:border-accent"
+          />
+          <span className="mt-1.5 block text-xs leading-relaxed text-muted">
+            Write it however you'd say it. Names, then what they had — a number
+            after a dish means how many were theirs. The lines get matched to
+            the receipt and everyone's share is worked out, so all that's left
+            is to check it. Leave this empty to tap the names instead.
+          </span>
+        </label>
+
         <label className="mt-3 inline-block">
           <span className="sr-only">Receipt photo</span>
           <input
@@ -319,7 +403,8 @@ export default function ScanNota({
           variant="ghost"
           onClick={() => {
             setDraft(null);
-            setAssigned([]);
+            setWeights([]);
+            setNames(null);
             setError("");
           }}
         >
@@ -357,21 +442,29 @@ export default function ScanNota({
             </div>
 
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {people.map((person, personIndex) => (
-                <button
-                  key={personIndex}
-                  type="button"
-                  aria-pressed={grid[index]?.[personIndex] ?? false}
-                  onClick={() => toggle(index, personIndex)}
-                  className={`pixel-press display border-2 px-2 py-1 text-xs ${
-                    grid[index]?.[personIndex]
-                      ? "border-accent bg-accent-soft text-foreground"
-                      : "border-hairline text-muted hover:border-accent hover:text-foreground"
-                  }`}
-                >
-                  {person.trim() || `#${personIndex + 1}`}
-                </button>
-              ))}
+              {roster.map((person, personIndex) => {
+                const share = grid[index]?.[personIndex] ?? 0n;
+                return (
+                  <button
+                    key={personIndex}
+                    type="button"
+                    aria-pressed={share > 0n}
+                    onClick={() => toggle(index, personIndex)}
+                    className={`pixel-press display border-2 px-2 py-1 text-xs ${
+                      share > 0n
+                        ? "border-accent bg-accent-soft text-foreground"
+                        : "border-hairline text-muted hover:border-accent hover:text-foreground"
+                    }`}
+                  >
+                    {person.trim() || `#${personIndex + 1}`}
+                    {/* Shown only when it isn't one, so a plain shared line
+                        stays a plain chip and a count is always a signal. */}
+                    {share > 1n ? (
+                      <span className="ml-1 text-accent">×{share.toString()}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
               <button
                 type="button"
                 onClick={() => everyone(index)}
@@ -494,7 +587,7 @@ export default function ScanNota({
       {quote && !isQuoteStale(quote) && totals.computed > 0n ? (
         <p className="text-xs text-muted">
           ≈ {formatDisplay(fiatToTokenUnits(totals.computed, quote, DEFAULT_TOKEN.decimals), DEFAULT_TOKEN.decimals)}{" "}
-          {DEFAULT_TOKEN.symbol} across {people.length} people.
+          {DEFAULT_TOKEN.symbol} across {roster.length} people.
         </p>
       ) : null}
     </div>
@@ -522,8 +615,52 @@ function optional(value: string): bigint {
 }
 
 /** A row padded or trimmed to one cell per person, so `map` is never short. */
-function fit(row: boolean[] | undefined, length: number): boolean[] {
-  return Array.from({ length }, (_, i) => row?.[i] ?? false);
+function fit(row: bigint[] | undefined, length: number): bigint[] {
+  return Array.from({ length }, (_, i) => row?.[i] ?? 0n);
+}
+
+/**
+ * The people the note named, in the order they were first mentioned.
+ *
+ * First mention rather than alphabetical, because that is the order the
+ * organiser typed and the order the rows will appear in — a list that comes
+ * back rearranged reads as though something was misunderstood.
+ *
+ * `null` when no line carries a share, which is how "there was no note" is
+ * told apart from "the note named nobody this receipt has": the first leaves
+ * the form's own rows in charge, the second is a scan worth redoing.
+ */
+function rosterFrom(items: ScannedNota["items"]): string[] | null {
+  const seen = new Map<string, string>();
+  for (const item of items) {
+    for (const share of item.shares ?? []) {
+      const key = share.name.trim().toLowerCase();
+      if (key !== "" && !seen.has(key)) seen.set(key, share.name.trim());
+    }
+  }
+  return seen.size === 0 ? null : [...seen.values()];
+}
+
+/**
+ * The assignment grid the scan came back with.
+ *
+ * Names are matched case-insensitively against the roster: the model is told
+ * to spell each person one way throughout, and this is what happens when it
+ * doesn't quite. A name that matches nothing is dropped rather than appended —
+ * the roster came from these same shares, so it can only be one the organiser
+ * removed, and re-adding it here would undo their edit.
+ */
+function gridFrom(items: ScannedNota["items"], roster: string[]): bigint[][] {
+  const index = new Map(roster.map((name, i) => [name.trim().toLowerCase(), i]));
+
+  return items.map((item) => {
+    const row = Array.from({ length: roster.length }, () => 0n);
+    for (const share of item.shares ?? []) {
+      const at = index.get(share.name.trim().toLowerCase());
+      if (at !== undefined) row[at] = BigInt(share.quantity);
+    }
+    return row;
+  });
 }
 
 function abs(value: bigint): bigint {

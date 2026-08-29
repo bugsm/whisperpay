@@ -36,10 +36,29 @@ export class NotaOutputError extends NotaScanError {}
  * "12000" is Rp 12,000. Two portions of nasi goreng at Rp 25,000 are one line
  * with `quantity: 2` and `amount: "50000"`.
  */
+/**
+ * One person's claim on one line, as a weight rather than a sum of money.
+ *
+ * `quantity` is how many of that line they had — 1 for a shared dish, 2 for the
+ * two of three teas that were theirs. It is deliberately not an amount: the
+ * model reads who had what, and `allocate` divides the line, so no figure the
+ * model produced is ever the number someone is asked to pay. That boundary is
+ * the whole reason this shape exists instead of a per-person total.
+ */
+export interface NotaShare {
+  name: string;
+  quantity: number;
+}
+
 export interface NotaItem {
   name: string;
   quantity: number;
   amount: string;
+  /**
+   * Who had this line, when the organiser described it. Absent when they
+   * didn't say — the UI then asks them to tap the names instead.
+   */
+  shares?: NotaShare[];
 }
 
 export interface ScannedNota {
@@ -158,11 +177,67 @@ function parseItem(value: unknown): NotaItem {
 
   const amount = requiredAmount(raw.amount, raw.name);
 
-  return {
+  const item: NotaItem = {
     name: raw.name.trim().slice(0, MAX_NAME_LENGTH),
     quantity: raw.quantity,
     amount,
   };
+
+  const shares = parseShares(raw.shares, item.name);
+  if (shares.length > 0) item.shares = shares;
+
+  return item;
+}
+
+/** More eaters on one line than a bill can hold lines. */
+const MAX_EATERS = 20;
+
+/**
+ * Who had a line, rebuilt name by name.
+ *
+ * Absent, empty, or not a list all mean the same thing — nobody said — and
+ * that is a state the UI has an answer for, so it is not an error. What *is*
+ * refused is a malformed entry: a claim with no name, or a quantity that isn't
+ * a whole number of things, would otherwise become a weight in an allocation
+ * and quietly move money between people.
+ *
+ * Duplicate names are folded together rather than rejected. "adi - ayam, adi -
+ * es teh" is a person listing their order in two breaths, not an ambiguity.
+ */
+function parseShares(value: unknown, label: string): NotaShare[] {
+  if (!Array.isArray(value)) return [];
+
+  const byName = new Map<string, NotaShare>();
+  for (const entry of value.slice(0, MAX_EATERS)) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new NotaOutputError(`"${label}" came back with an unreadable share.`);
+    }
+    const raw = entry as Record<string, unknown>;
+
+    if (typeof raw.name !== "string" || raw.name.trim() === "") {
+      throw new NotaOutputError(`"${label}" was given to somebody with no name.`);
+    }
+    if (
+      typeof raw.quantity !== "number" ||
+      !Number.isInteger(raw.quantity) ||
+      raw.quantity < 1 ||
+      raw.quantity > 999
+    ) {
+      throw new NotaOutputError(
+        `"${label}" came back with a share that isn't a whole number of things.`
+      );
+    }
+
+    const name = raw.name.trim().slice(0, MAX_NAME_LENGTH);
+    const existing = byName.get(name.toLowerCase());
+    if (existing) {
+      existing.quantity = Math.min(999, existing.quantity + raw.quantity);
+    } else {
+      byName.set(name.toLowerCase(), { name, quantity: raw.quantity });
+    }
+  }
+
+  return [...byName.values()];
 }
 
 function requiredAmount(value: unknown, label: string): string {

@@ -225,3 +225,135 @@ describe("only images that are images", () => {
     }
   });
 });
+
+/**
+ * Who had what.
+ *
+ * These weights become the divisor in `allocate`, so a share parsed wrong is
+ * money moved from one person to another — quietly, and after the organiser has
+ * already checked the amounts. The malformed cases are refused rather than
+ * defaulted, because a default here is a guess about somebody's dinner.
+ */
+describe("parseNota reads who had what", () => {
+  const withShares = {
+    ...ANSWER,
+    items: [
+      {
+        ...ANSWER.items[0],
+        shares: [
+          { name: "udin", quantity: 1 },
+          { name: "adi", quantity: 1 },
+        ],
+      },
+      { ...ANSWER.items[1] },
+      {
+        ...ANSWER.items[2],
+        shares: [
+          { name: "udin", quantity: 1 },
+          { name: "adi", quantity: 2 },
+        ],
+      },
+    ],
+  };
+
+  it("keeps each person's quantity as its own weight", () => {
+    const nota = parseNota(withShares);
+
+    assert.deepEqual(nota.items[0].shares, [
+      { name: "udin", quantity: 1 },
+      { name: "adi", quantity: 1 },
+    ]);
+    // Two of the three teas were adi's — the line divides two-to-one, not evenly.
+    assert.deepEqual(nota.items[2].shares, [
+      { name: "udin", quantity: 1 },
+      { name: "adi", quantity: 2 },
+    ]);
+  });
+
+  it("leaves a line the note didn't mention unassigned", () => {
+    // Not spread across everyone as a guess: an unassigned line is shown to
+    // the organiser, and a wrong guess is not.
+    assert.equal(parseNota(withShares).items[1].shares, undefined);
+  });
+
+  it("treats no note at all as nobody assigned", () => {
+    for (const item of parseNota(ANSWER).items) {
+      assert.equal(item.shares, undefined);
+    }
+  });
+
+  it("folds a person who was listed twice on one line", () => {
+    // "adi - es teh, adi - es teh" is one person listing their order in two
+    // breaths, not an ambiguity worth refusing.
+    const nota = parseNota({
+      ...ANSWER,
+      items: [
+        {
+          ...ANSWER.items[0],
+          shares: [
+            { name: "adi", quantity: 1 },
+            { name: "Adi", quantity: 2 },
+          ],
+        },
+        ...ANSWER.items.slice(1),
+      ],
+    });
+
+    assert.deepEqual(nota.items[0].shares, [{ name: "adi", quantity: 3 }]);
+  });
+
+  it("ignores a shares field that isn't a list", () => {
+    const nota = parseNota({
+      ...ANSWER,
+      items: [{ ...ANSWER.items[0], shares: "udin and adi" }, ...ANSWER.items.slice(1)],
+    });
+    assert.equal(nota.items[0].shares, undefined);
+  });
+
+  it("refuses a share with no name", () => {
+    for (const name of ["", "   ", 42, null]) {
+      assert.throws(
+        () =>
+          parseNota({
+            ...ANSWER,
+            items: [
+              { ...ANSWER.items[0], shares: [{ name, quantity: 1 }] },
+              ...ANSWER.items.slice(1),
+            ],
+          }),
+        NotaOutputError,
+        `name ${JSON.stringify(name)} should be refused`
+      );
+    }
+  });
+
+  it("refuses a quantity that isn't a whole number of things", () => {
+    for (const quantity of [0, -1, 1.5, "2", null, 1000]) {
+      assert.throws(
+        () =>
+          parseNota({
+            ...ANSWER,
+            items: [
+              { ...ANSWER.items[0], shares: [{ name: "udin", quantity }] },
+              ...ANSWER.items.slice(1),
+            ],
+          }),
+        NotaOutputError,
+        `quantity ${JSON.stringify(quantity)} should be refused`
+      );
+    }
+  });
+
+  it("caps how many people one line can be split between", () => {
+    const shares = Array.from({ length: 40 }, (_, i) => ({
+      name: `p${i}`,
+      quantity: 1,
+    }));
+    const nota = parseNota({
+      ...ANSWER,
+      items: [{ ...ANSWER.items[0], shares }, ...ANSWER.items.slice(1)],
+    });
+
+    assert.equal(nota.items[0].shares?.length, 20);
+  });
+});

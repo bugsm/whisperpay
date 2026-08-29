@@ -108,6 +108,27 @@ const OUTPUT_SCHEMA = {
             description:
               "Line total for all of them, in the currency's smallest unit, digits only.",
           },
+          shares: {
+            type: "array",
+            description:
+              "Who had this line, from the diners note. Omit when no note was given or nobody was named for this line.",
+            items: {
+              type: "object",
+              properties: {
+                name: {
+                  type: "string",
+                  description: "The person's name, spelled as the note spells it.",
+                },
+                quantity: {
+                  type: "integer",
+                  description:
+                    "How many of this line were theirs. 1 unless the note says otherwise.",
+                },
+              },
+              required: ["name", "quantity"],
+              additionalProperties: false,
+            },
+          },
         },
         required: ["name", "quantity", "amount"],
         additionalProperties: false,
@@ -145,13 +166,32 @@ Rules that matter more than anything else:
 - Read the separators the way the receipt's own country writes them, not the way English does. "." is a thousands separator across Indonesia, Germany, Italy, Brazil and much of Europe, where "," is the decimal point. On an Indonesian receipt "12.500" is twelve thousand five hundred, not twelve and a half; on a German one "12,50" is twelve fifty. Decide from the currency and the language, and note that a number with exactly two digits after the final separator is usually a decimal in a two-decimal currency and a thousands group in a zero-decimal one.
 - An item's amount is the line total for the whole quantity, as printed on that line. If only a unit price is shown, multiply it by the quantity.
 - Omit tax, service, discount or total entirely when the receipt does not show them. Never invent a zero.
-- If a line is genuinely unreadable, leave it out rather than guessing at its price. A missing line is obvious to the person checking; a wrong price is not.`;
+- If a line is genuinely unreadable, leave it out rather than guessing at its price. A missing line is obvious to the person checking; a wrong price is not.
+
+When the user's message includes a note saying who had what, also fill in "shares" on each line:
+
+- The note is written the way people actually talk: "udin - ayam, es teh; adi - ayam 1, es teh 2", or with newlines, or with "dan"/"and" between dishes. Names come first, dishes after a dash or a colon.
+- Match a dish in the note to a line on the receipt by meaning, not by string equality. "ayam" is the receipt's "Ayam Goreng Kremes"; "es teh" is "Es Teh Manis". A note is written from memory and a receipt from a till.
+- A bare number next to a dish is how many of it were theirs: "adi - ayam 1, es teh 2" is quantity 1 and quantity 2. No number means 1.
+- When several people are named for one line, list each of them with their own quantity. Their quantities do not need to add up to the line's quantity — the split is worked out elsewhere, and a note that disagrees with the receipt is the person's business, not yours to correct.
+- Leave "shares" off any line the note doesn't mention. Do not spread it across everyone as a guess: an unassigned line is shown to the organiser to resolve, and a wrong guess is not.
+- Use the note's spelling of each name, and use one spelling per person throughout.
+- If no note was given, omit "shares" everywhere.`;
 
 export interface ScanInput {
   /** base64, with no `data:` prefix. */
   data: string;
   mediaType: NotaMediaType;
+  /**
+   * Who had what, in the organiser's own words — "udin - ayam, es teh; adi -
+   * ayam 1, es teh 2". Optional: without it the lines come back unassigned and
+   * the organiser taps the names instead.
+   */
+  diners?: string;
 }
+
+/** Long enough for a table of twenty, short enough not to be a prompt. */
+export const MAX_DINERS_LENGTH = 2000;
 
 /**
  * The model's answer as text, whatever envelope it arrived in.
@@ -203,6 +243,8 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
     throw new NotaConfigError("Receipt scanning isn't configured on this deployment.");
   }
 
+  const diners = image.diners?.trim().slice(0, MAX_DINERS_LENGTH);
+
   // Constructed inside a guard because it is the one step that can fail before
   // any request is made: a malformed ANTHROPIC_BASE_URL throws right here, and
   // outside a try it left the route with an error carrying no class at all —
@@ -241,7 +283,14 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
             },
             {
               type: "text",
-              text: "Read this receipt. Return every line item with its printed total.",
+              // The note is fenced and labelled as the diners' words. It is
+              // whatever the organiser typed, so it is data the model reads
+              // about, never instructions it takes from — the rules for
+              // reading it are in the system prompt, above this and out of
+              // reach of anything typed into the box.
+              text: diners
+                ? `Read this receipt. Return every line item with its printed total, and fill in "shares" from the note below.\n\nThe diners' note, as written:\n<note>\n${diners}\n</note>`
+                : "Read this receipt. Return every line item with its printed total.",
             },
           ],
         },
