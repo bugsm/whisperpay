@@ -17,16 +17,16 @@ export const STATUS_LABEL: Record<RequestStatus, string> = {
 /** Tinted border and text — the default, used where the reader owns the request. */
 const TINTED: Record<RequestStatus, string> = {
   pending: "border-hairline text-muted",
-  submitted: "border-amber-400/40 text-amber-300",
-  confirmed: "border-emerald-400/40 text-emerald-300",
+  submitted: "border-warn text-warn",
+  confirmed: "border-ok text-ok",
   expired: "border-hairline text-muted line-through",
 };
 
 /** Text tone only, on a plain hairline border. */
 const SUBTLE: Record<RequestStatus, string> = {
   pending: "border-hairline text-muted",
-  submitted: "border-hairline text-amber-300",
-  confirmed: "border-hairline text-emerald-300",
+  submitted: "border-hairline text-warn",
+  confirmed: "border-hairline text-ok",
   expired: "border-hairline text-muted",
 };
 
@@ -47,7 +47,7 @@ export default function Badge({
 }) {
   return (
     <span
-      className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs ${
+      className={`display shrink-0 border-2 px-2 py-0.5 text-xs ${
         (subtle ? SUBTLE : TINTED)[status]
       }`}
     >

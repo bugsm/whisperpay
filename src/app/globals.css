@@ -1,9 +1,18 @@
 @import "tailwindcss";
 
 /*
- * Whisper Pay is a single, deliberately dark surface. A payment page is a
- * moment of trust — the visual language stays quiet, high-contrast and free of
- * decoration that could be mistaken for a status signal.
+ * Whisper Pay is drawn on a pixel grid. Every offset, border and shadow here is
+ * a multiple of --pixel-unit, and nothing is rounded.
+ *
+ * The style changed; the constraint that shaped the old one did not. A payment
+ * page is a moment of trust, so two rules outlive the restyle: decoration never
+ * borrows a colour from a status signal, and nothing animates next to a number.
+ * Pixel art pulls hard toward saturated colour and busy motion, which is
+ * exactly why those limits are written down rather than left to taste.
+ *
+ * Surfaces are opaque. The old palette stacked translucent whites, which works
+ * under soft shadows and falls apart under hard ones — a 2px border drawn over
+ * a see-through panel reads as a rendering fault rather than a frame.
  */
 
 @theme inline {
@@ -15,19 +24,47 @@
   --color-muted: var(--muted);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+
+  /* Status. Three colours, and no fourth — see `Badge`. */
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-pixel);
+
+  /* Hard shadows only. A blur radius has no meaning on a pixel grid. */
+  --shadow-hard: 4px 4px 0 0 var(--shadow);
+  --shadow-hard-sm: 2px 2px 0 0 var(--shadow);
 }
 
 :root {
-  --background: #08080c;
-  --foreground: #ededf2;
-  --surface: rgba(255, 255, 255, 0.03);
-  --surface-raised: rgba(255, 255, 255, 0.06);
-  --hairline: rgba(255, 255, 255, 0.09);
-  --muted: #8b8b9a;
-  --accent: #a78bfa;
-  --accent-soft: rgba(167, 139, 250, 0.14);
+  --pixel-unit: 4px;
+
+  --background: #100e1a;
+  --foreground: #f2f0fb;
+  --surface: #1a1730;
+  --surface-raised: #262147;
+  /*
+   * Kept under its old name even though it is no longer a hairline — every
+   * component in the app already says `border-hairline`, and renaming the token
+   * would have meant touching all of them to change one value.
+   */
+  --hairline: #3b3468;
+  --muted: #9e97c8;
+
+  --accent: #b9a3ff;
+  --accent-soft: #2e2551;
+  /* Ink on an accent fill. Dark enough to stay readable when accent is bright. */
+  --accent-ink: #140f24;
+
+  --ok: #55e6a5;
+  --warn: #ffc84a;
+  --danger: #ff7a7a;
+
+  --shadow: #05040c;
 }
 
 body {
@@ -37,16 +74,81 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* A single soft light source behind the page, so cards read as raised. */
-.ambient {
-  background-image: radial-gradient(
-    60rem 40rem at 50% -10%,
-    rgba(167, 139, 250, 0.10),
-    transparent 70%
-  );
+/*
+ * Headings and labels. Not body text: the pixel face is a display face, and
+ * this app asks people to read several paragraphs about what stays private.
+ */
+.display {
+  font-family: var(--font-pixel), var(--font-geist-mono), ui-monospace, monospace;
+  letter-spacing: 0.01em;
 }
 
 /* Numbers in tables and receipts must not shift width as they change. */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A control that physically depresses: it moves onto its own shadow rather
+ * than fading. Callers pair this with `shadow-hard-sm`, whose offset the
+ * translate is sized to cancel exactly.
+ */
+.pixel-press {
+  transition:
+    transform 60ms steps(2, end),
+    box-shadow 60ms steps(2, end),
+    background-color 60ms steps(2, end);
+}
+
+/*
+ * Gated on `no-preference` rather than reverted further down, so the reduce
+ * branch never has to guess which shadow utility a caller happened to use.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .pixel-press:active:not(:disabled) {
+    transform: translate(2px, 2px);
+    box-shadow: 0 0 0 0 var(--shadow);
+  }
+}
+
+/* Keyboard focus gets its own mark, never a borrowed shadow change. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * Raster art that should keep its hard edges instead of being smoothed — a QR
+ * code, a sprite. Opt-in rather than a blanket `img` rule, because vector marks
+ * and photographs want the browser's normal scaling.
+ */
+.pixelated {
+  image-rendering: pixelated;
+}
+
+/*
+ * Motion is decoration here — every state it conveys is also written out in
+ * words, so switching it off costs a reader nothing.
+ */
+@media (prefers-reduced-motion: reduce) {
+  /*
+   * The press is dropped whole, not half — a button that flattens without
+   * moving describes no physical thing. Feedback returns as an instant tone
+   * change: a state, not a movement.
+   */
+  .pixel-press {
+    transition: none;
+  }
+
+  .pixel-press:active:not(:disabled) {
+    filter: brightness(0.85);
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -17,13 +17,13 @@ export default function Notice({
 }) {
   return (
     <div
-      className={`rounded-xl border p-4 ${
+      className={`border-2 p-4 ${
         tone === "warn"
-          ? "border-amber-400/30 bg-amber-400/5"
-          : "border-hairline bg-surface-raised/40"
+          ? "border-warn/50 bg-warn/10"
+          : "border-hairline bg-surface-raised"
       }`}
     >
-      <p className="text-sm font-medium">{title}</p>
+      <p className="display text-sm">{title}</p>
       {/* A div rather than a p — callers put buttons inside this. */}
       <div className="mt-1 text-xs leading-relaxed text-muted">{children}</div>
     </div>

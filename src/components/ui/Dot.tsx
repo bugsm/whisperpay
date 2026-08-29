@@ -10,11 +10,16 @@ import type { RequestStatus } from "@/lib/request/types";
  */
 const FILL: Record<RequestStatus, string> = {
   pending: "bg-muted/40",
-  submitted: "bg-amber-400 shadow-[0_0_12px] shadow-amber-400/60",
-  confirmed: "bg-emerald-400 shadow-[0_0_12px] shadow-emerald-400/60",
+  submitted: "bg-warn",
+  confirmed: "bg-ok",
   expired: "bg-muted/40",
 };
 
+/**
+ * A square, and lit by fill alone. The old dot carried a 12px blur halo, which
+ * is the one effect a pixel grid can't render — and it sat next to a headline
+ * stating the same thing in words, so nothing is lost by dropping it.
+ */
 export default function Dot({ status }: { status: RequestStatus }) {
-  return <span aria-hidden className={`size-3 rounded-full ${FILL[status]}`} />;
+  return <span aria-hidden className={`size-3 ${FILL[status]}`} />;
 }

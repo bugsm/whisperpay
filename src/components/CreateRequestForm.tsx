@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import Button, { buttonClass } from "@/components/ui/Button";
+import Choice from "@/components/ui/Choice";
 import Field from "@/components/ui/Field";
-import { CARD_SURFACE } from "@/components/ui/surfaces";
+import { CARD_SURFACE, INSET_SURFACE } from "@/components/ui/surfaces";
 import { useWallet } from "@/components/wallet/walletStore";
 import { isStarkDomain } from "@/lib/identity/encoding";
 import { saveToHistory } from "@/lib/request/history";
@@ -205,12 +207,12 @@ export default function CreateRequestForm() {
   if (created) {
     return (
       <section className={CARD_SURFACE}>
-        <h2 className="text-lg font-semibold">
+        <h2 className="display text-lg">
           {created.scheduleLabel
             ? "Your recurring link is ready"
             : "Your payment link is ready"}
         </h2>
-        <p className="mt-1 text-sm leading-relaxed text-muted">
+        <p className="mt-2 text-sm leading-relaxed text-muted">
           {created.scheduleLabel ? (
             <>
               <span className="text-foreground">{created.scheduleLabel}.</span>{" "}
@@ -230,15 +232,11 @@ export default function CreateRequestForm() {
             readOnly
             value={created.url}
             onFocus={(event) => event.currentTarget.select()}
-            className="min-w-0 flex-1 rounded-xl border border-hairline bg-background px-3 py-2.5 font-mono text-xs"
+            className={`${INSET_SURFACE} min-w-0 flex-1 px-3 py-2.5 font-mono text-xs`}
           />
-          <button
-            type="button"
-            onClick={() => void copyLink(created.url, "pay")}
-            className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-[#14101f] transition hover:brightness-110"
-          >
+          <Button variant="primary" onClick={() => void copyLink(created.url, "pay")}>
             {copied === "pay" ? "Copied" : "Copy"}
-          </button>
+          </Button>
         </div>
 
         {/*
@@ -246,24 +244,23 @@ export default function CreateRequestForm() {
           invoice — sharing it to show something was paid also shares the amount
           and both parties. This one shows only the state.
         */}
-        <div className="mt-5 rounded-xl border border-hairline bg-background p-4">
-          <p className="text-xs font-medium tracking-wide text-muted uppercase">
+        <div className={`${INSET_SURFACE} mt-5 p-4`}>
+          <p className="display text-xs tracking-wide text-muted uppercase">
             Status link
           </p>
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          <div className="mt-2.5 flex flex-col gap-2 sm:flex-row">
             <input
               readOnly
               value={created.statusUrl}
               onFocus={(event) => event.currentTarget.select()}
-              className="min-w-0 flex-1 rounded-lg border border-hairline bg-surface px-3 py-2 font-mono text-xs"
+              className="min-w-0 flex-1 border-2 border-hairline bg-surface px-3 py-2 font-mono text-xs"
             />
-            <button
-              type="button"
+            <Button
+              size="sm"
               onClick={() => void copyLink(created.statusUrl, "status")}
-              className="rounded-lg border border-hairline px-3 py-2 text-xs transition hover:bg-surface-raised"
             >
               {copied === "status" ? "Copied" : "Copy"}
-            </button>
+            </Button>
           </div>
           <p className="mt-2.5 text-xs leading-relaxed text-muted">
             Share this one to show whether you've been paid. It carries no
@@ -272,28 +269,23 @@ export default function CreateRequestForm() {
           </p>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-3 text-sm">
-          <Link
-            href={created.path}
-            className="rounded-xl border border-hairline px-4 py-2 transition hover:bg-surface-raised"
-          >
+        <div className="mt-5 flex flex-wrap gap-3">
+          <Link href={created.path} className={buttonClass("secondary")}>
             Open payer view
           </Link>
-          <button
-            type="button"
+          <Button
             onClick={() => {
               setCreated(null);
               setCopied(null);
               setAmount("");
               setMemo("");
             }}
-            className="rounded-xl border border-hairline px-4 py-2 transition hover:bg-surface-raised"
           >
             Create another
-          </button>
+          </Button>
         </div>
 
-        {error ? <p className="mt-4 text-xs text-red-400">{error}</p> : null}
+        {error ? <p className="mt-4 text-xs text-danger">{error}</p> : null}
       </section>
     );
   }
@@ -303,8 +295,8 @@ export default function CreateRequestForm() {
       onSubmit={handleSubmit}
       className={CARD_SURFACE}
     >
-      <h2 className="text-lg font-semibold">Request a payment</h2>
-      <p className="mt-1 text-sm text-muted">
+      <h2 className="display text-lg">Request a payment</h2>
+      <p className="mt-2 text-sm text-muted">
         You'll get a link to share. Nothing is published on-chain until someone
         pays.
       </p>
@@ -320,25 +312,28 @@ export default function CreateRequestForm() {
               onChange={(event) => setRecipient(event.target.value.trim())}
               placeholder="alice.stark or 0x…"
               spellCheck={false}
-              className={`min-w-0 flex-1 rounded-xl border bg-background px-3 py-2.5 font-mono text-xs outline-none transition focus:border-accent ${
-                recipientValid ? "border-hairline" : "border-red-500/60"
+              className={`min-w-0 flex-1 border-2 bg-background px-3 py-2.5 font-mono text-xs outline-none focus:border-accent ${
+                recipientValid ? "border-hairline" : "border-danger"
               }`}
             />
             {isConnected && address ? (
-              <button
-                type="button"
+              <Button
+                size="sm"
+                variant="ghost"
+                className="shrink-0"
                 onClick={() => setRecipient(address)}
-                className="shrink-0 rounded-xl border border-hairline px-3 text-xs text-muted transition hover:bg-surface-raised hover:text-foreground"
               >
                 Use mine
-              </button>
+              </Button>
             ) : null}
           </div>
           <ResolutionHint resolution={resolution} typed={recipient} />
         </Field>
 
         <Field label={recurring ? "Amount per payment" : "Amount"}>
-          <div className="flex items-center gap-2 rounded-xl border border-hairline bg-background px-3 py-2.5 transition focus-within:border-accent">
+          <div
+            className={`${INSET_SURFACE} flex items-center gap-2 px-3 py-2.5 focus-within:border-accent`}
+          >
             <input
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
@@ -347,7 +342,7 @@ export default function CreateRequestForm() {
               required
               className="tabular min-w-0 flex-1 bg-transparent text-2xl font-medium outline-none"
             />
-            <span className="shrink-0 rounded-lg bg-surface-raised px-2.5 py-1 text-xs font-medium">
+            <span className="display shrink-0 bg-surface-raised px-2.5 py-1 text-xs">
               {DEFAULT_TOKEN.symbol}
             </span>
           </div>
@@ -356,23 +351,18 @@ export default function CreateRequestForm() {
         <Field label="Repeats">
           <div className="flex flex-wrap gap-2">
             {SCHEDULE_PRESETS.map((preset, index) => (
-              <button
+              <Choice
                 key={preset.label}
-                type="button"
+                selected={index === repeatIndex}
                 onClick={() => setRepeatIndex(index)}
-                className={`rounded-lg border px-3 py-1.5 text-xs transition ${
-                  index === repeatIndex
-                    ? "border-accent bg-accent-soft text-foreground"
-                    : "border-hairline text-muted hover:bg-surface-raised"
-                }`}
               >
                 {preset.label}
-              </button>
+              </Choice>
             ))}
           </div>
 
           {recurring ? (
-            <div className="mt-3 rounded-xl border border-hairline bg-background p-4">
+            <div className={`${INSET_SURFACE} mt-3 p-4`}>
               {/* Not a <label> — `Field` already is one, and they can't nest. */}
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="text-muted">Number of payments</span>
@@ -382,8 +372,8 @@ export default function CreateRequestForm() {
                   onChange={(event) => setInstallments(event.target.value.trim())}
                   inputMode="numeric"
                   placeholder="Until cancelled"
-                  className={`tabular w-36 rounded-lg border bg-surface px-2.5 py-1.5 outline-none transition focus:border-accent ${
-                    installmentsValid ? "border-hairline" : "border-red-500/60"
+                  className={`tabular w-36 border-2 bg-surface px-2.5 py-1.5 outline-none focus:border-accent ${
+                    installmentsValid ? "border-hairline" : "border-danger"
                   }`}
                 />
               </div>
@@ -402,7 +392,7 @@ export default function CreateRequestForm() {
             onChange={(event) => setMemo(event.target.value)}
             maxLength={MAX_MEMO_LENGTH}
             placeholder="Invoice #42"
-            className="w-full rounded-xl border border-hairline bg-background px-3 py-2.5 text-sm outline-none transition focus:border-accent"
+            className={`${INSET_SURFACE} w-full px-3 py-2.5 text-sm outline-none focus:border-accent`}
           />
         </Field>
 
@@ -418,37 +408,34 @@ export default function CreateRequestForm() {
           <Field label="Link expires">
             <div className="flex flex-wrap gap-2">
               {EXPIRY_PRESETS.map((preset, index) => (
-                <button
+                <Choice
                   key={preset.label}
-                  type="button"
+                  selected={index === expiryIndex}
                   onClick={() => setExpiryIndex(index)}
-                  className={`rounded-lg border px-3 py-1.5 text-xs transition ${
-                    index === expiryIndex
-                      ? "border-accent bg-accent-soft text-foreground"
-                      : "border-hairline text-muted hover:bg-surface-raised"
-                  }`}
                 >
                   {preset.label}
-                </button>
+                </Choice>
               ))}
             </div>
           </Field>
         )}
       </div>
 
-      {error ? <p className="mt-5 text-sm text-red-400">{error}</p> : null}
+      {error ? <p className="mt-5 text-sm text-danger">{error}</p> : null}
 
-      <button
+      <Button
         type="submit"
+        variant="primary"
+        size="lg"
         disabled={submitting}
-        className="mt-6 w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-[#14101f] transition hover:brightness-110 disabled:opacity-50"
+        className="mt-6 w-full"
       >
         {submitting
           ? "Creating…"
           : recurring
             ? "Create recurring link"
             : "Create payment link"}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -472,13 +459,13 @@ function ResolutionHint({
   }
 
   if (resolution.state === "error") {
-    return <p className="mt-1.5 text-xs text-red-400">{resolution.message}</p>;
+    return <p className="mt-1.5 text-xs text-danger">{resolution.message}</p>;
   }
 
   const typedAName = typed.toLowerCase().endsWith(".stark");
 
   return (
-    <p className="mt-1.5 font-mono text-xs break-all text-emerald-300/90">
+    <p className="mt-1.5 font-mono text-xs break-all text-ok">
       {typedAName
         ? `→ ${resolution.address}`
         : resolution.name

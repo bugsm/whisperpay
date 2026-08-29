@@ -11,4 +11,15 @@
  * others: a restyle had to find all twelve, and finding eleven looks exactly
  * like finding twelve until someone opens the twelfth page.
  */
-export const CARD_SURFACE = "rounded-2xl border border-hairline bg-surface p-6";
+export const CARD_SURFACE =
+  "border-2 border-hairline bg-surface p-6 shadow-hard";
+
+/**
+ * The inset surface — inputs, and panels nested inside a card.
+ *
+ * Darker than the card it sits in rather than lighter, so depth reads as a hole
+ * punched into the panel. That direction matters once shadows are hard: a
+ * raised inset and a hard shadow describe two different light sources, and the
+ * eye picks the contradiction out immediately.
+ */
+export const INSET_SURFACE = "border-2 border-hairline bg-background";

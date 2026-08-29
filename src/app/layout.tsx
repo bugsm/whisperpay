@@ -1,12 +1,23 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Pixelify_Sans } from "next/font/google";
 
 import ConnectWallet from "@/components/wallet/ConnectWallet";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+
+/**
+ * The display face, for headings and labels only.
+ *
+ * Body copy stays in Geist and amounts stay in Geist Mono. That split isn't a
+ * compromise on the look — it's the whole reason the look is usable here. This
+ * app asks people to read paragraphs about what does and doesn't stay private,
+ * and it asks them to check a number before approving a transfer. A bitmap face
+ * is the wrong tool for both.
+ */
+const pixel = Pixelify_Sans({ variable: "--font-pixel", subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Whisper Pay — private payment requests on Starknet",
@@ -18,20 +29,21 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${pixel.variable} h-full antialiased`}
     >
-      <body className="ambient flex min-h-full flex-col">
-        <header className="border-b border-hairline">
+      <body className="flex min-h-full flex-col">
+        <header className="border-b-2 border-hairline bg-surface">
           <div className="mx-auto flex w-full max-w-3xl items-center gap-4 px-5 py-4">
-            <Link href="/" className="flex items-center gap-2 font-semibold">
-              <span
-                aria-hidden
-                className="size-2.5 rounded-full bg-accent shadow-[0_0_12px_var(--accent)]"
-              />
+            <Link href="/" className="display flex items-center gap-2.5 text-base">
+              {/* A square, not a glowing dot — the old mark was a soft radial. */}
+              <span aria-hidden className="size-2.5 bg-accent" />
               Whisper&nbsp;Pay
             </Link>
             <nav className="ml-auto flex items-center gap-4 text-sm text-muted">
-              <Link href="/dashboard" className="transition hover:text-foreground">
+              <Link
+                href="/dashboard"
+                className="display text-xs transition-colors hover:text-foreground"
+              >
                 Dashboard
               </Link>
               <ConnectWallet variant="compact" />
@@ -43,7 +55,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           {children}
         </main>
 
-        <footer className="border-t border-hairline">
+        <footer className="border-t-2 border-hairline bg-surface">
           <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-4 gap-y-1 px-5 py-4 text-xs text-muted">
             <span>Starknet mainnet · STRK20 privacy pool</span>
             <a

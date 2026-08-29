@@ -18,7 +18,7 @@ export default function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-medium tracking-wide text-muted uppercase">
+      <span className="display mb-2 block text-xs tracking-wide text-muted uppercase">
         {label}
       </span>
       {children}
