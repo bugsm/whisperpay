@@ -36,9 +36,14 @@ export default function NewBillPage() {
         server, because only the server can see whether a store is configured.
         Offering it and failing later would hand someone a link that works once.
       */}
+      {/*
+        Trimmed for the same reason `scanNota` trims: a key that is nothing but
+        whitespace is truthy here and empty there, which is the one combination
+        that offers the mode and then refuses it.
+      */}
       <CreateBillForm
         canShorten={getBillStore().durable}
-        canScan={Boolean(process.env.ANTHROPIC_API_KEY)}
+        canScan={Boolean(process.env.ANTHROPIC_API_KEY?.trim())}
       />
 
       <Card>

@@ -142,20 +142,41 @@ export default function ScanNota({
     );
   }
 
-  function toggle(itemIndex: number, personIndex: number) {
+  /**
+   * The assignment grid, sized to the people who are on the form *now*.
+   *
+   * `assigned` is built once, at scan time, from the names that existed then —
+   * and the organiser can add a name afterwards without the draft being thrown
+   * away, because a scan costs an API call. `map` cannot lengthen an array, so
+   * a grid left at its original width gave that person a column of buttons that
+   * flipped nothing and an error on "Use these amounts" they had no way to act
+   * on. Every read and every write goes through here instead.
+   *
+   * Removing a name is the case padding cannot repair: the rows are keyed by
+   * position, so everyone after the removed name shifts down a column and their
+   * ticks move with it. Nothing here can tell that apart from a deliberate
+   * change, which is why the form clears a scan whenever a row is added or
+   * removed.
+   */
+  const grid = (draft?.items ?? []).map((_, i) => fit(assigned[i], people.length));
+
+  function setRow(itemIndex: number, next: (row: boolean[]) => boolean[]) {
+    // Refitted inside the updater rather than from `grid`, so two taps batched
+    // into one render can't have the second overwrite the first.
     setAssigned((current) =>
-      current.map((row, i) =>
-        i === itemIndex
-          ? row.map((on, p) => (p === personIndex ? !on : on))
-          : row
-      )
+      (draft?.items ?? []).map((_, i) => {
+        const row = fit(current[i], people.length);
+        return i === itemIndex ? next(row) : row;
+      })
     );
   }
 
+  function toggle(itemIndex: number, personIndex: number) {
+    setRow(itemIndex, (row) => row.map((on, p) => (p === personIndex ? !on : on)));
+  }
+
   function everyone(itemIndex: number) {
-    setAssigned((current) =>
-      current.map((row, i) => (i === itemIndex ? row.map(() => true) : row))
-    );
+    setRow(itemIndex, (row) => row.map(() => true));
   }
 
   /**
@@ -184,7 +205,7 @@ export default function ScanNota({
 
     const unassigned = draft.items
       .map((item, index) => ({ item, index }))
-      .filter(({ index }) => !assigned[index]?.some(Boolean));
+      .filter(({ index }) => !grid[index]?.some(Boolean));
     if (unassigned.length > 0) {
       setError(
         `Nobody is down for ${unassigned
@@ -197,7 +218,7 @@ export default function ScanNota({
     // Each line split among the people who had it.
     const perPerson = people.map(() => 0n);
     items.forEach((amount, itemIndex) => {
-      const weights = people.map((_, p) => (assigned[itemIndex][p] ? 1n : 0n));
+      const weights = people.map((_, p) => (grid[itemIndex][p] ? 1n : 0n));
       allocate(amount, weights).forEach((share, p) => {
         perPerson[p] += share;
       });
@@ -283,10 +304,10 @@ export default function ScanNota({
       ...item,
       amount: /^\d+$/.test(item.amount.trim()) ? item.amount.trim() : "0",
     })),
-    tax: draft.tax || undefined,
-    service: draft.service || undefined,
-    discount: draft.discount || undefined,
-    total: /^\d+$/.test(draft.total.trim()) ? draft.total.trim() : undefined,
+    tax: digits(draft.tax),
+    service: digits(draft.service),
+    discount: digits(draft.discount),
+    total: digits(draft.total),
   });
 
   return (
@@ -340,10 +361,10 @@ export default function ScanNota({
                 <button
                   key={personIndex}
                   type="button"
-                  aria-pressed={assigned[index]?.[personIndex] ?? false}
+                  aria-pressed={grid[index]?.[personIndex] ?? false}
                   onClick={() => toggle(index, personIndex)}
                   className={`pixel-press display border-2 px-2 py-1 text-xs ${
-                    assigned[index]?.[personIndex]
+                    grid[index]?.[personIndex]
                       ? "border-accent bg-accent-soft text-foreground"
                       : "border-hairline text-muted hover:border-accent hover:text-foreground"
                   }`}
@@ -408,6 +429,22 @@ export default function ScanNota({
         </Notice>
       ) : null}
 
+      {/*
+        A discount larger than everything it is deducted from. Worth its own
+        sentence rather than a silent absence: `fiatToTokenUnits` refuses a
+        negative amount, so the conversion line below simply disappears, and
+        without this the organiser would be looking at a bill that quietly
+        stopped telling them what it came to.
+      */}
+      {totals.computed <= 0n ? (
+        <Notice tone="warn" title="The discount is bigger than the bill">
+          These lines come to {formatFiat(totals.computed, draft.currency)},
+          which is not something anyone can be asked to pay. A receipt usually
+          prints a discount as a deduction from the subtotal — check that figure
+          against the paper.
+        </Notice>
+      ) : null}
+
       {!currency ? (
         <Notice tone="warn" title={`No rate for ${draft.currency}`}>
           Whisper Pay can't convert this currency, so these amounts can't become
@@ -454,7 +491,7 @@ export default function ScanNota({
       >
         Use these amounts
       </Button>
-      {quote && !isQuoteStale(quote) ? (
+      {quote && !isQuoteStale(quote) && totals.computed > 0n ? (
         <p className="text-xs text-muted">
           ≈ {formatDisplay(fiatToTokenUnits(totals.computed, quote, DEFAULT_TOKEN.decimals), DEFAULT_TOKEN.decimals)}{" "}
           {DEFAULT_TOKEN.symbol} across {people.length} people.
@@ -464,9 +501,29 @@ export default function ScanNota({
   );
 }
 
-function optional(value: string): bigint {
+/**
+ * One of these fields as `notaTotals` needs it, or nothing at all.
+ *
+ * `notaTotals` takes a `ScannedNota` — something that has already been through
+ * `parseNota` — and calls `BigInt` on these fields directly. What is in state
+ * here is an input the organiser is still typing into, where `12.500` is what
+ * an Indonesian receipt actually prints: `BigInt("12.500")` throws a
+ * `SyntaxError`, and thrown from the render body it takes the page with it.
+ * Anything but digits is withheld rather than handed over.
+ */
+function digits(value: string): string | undefined {
   const trimmed = value.trim();
-  return /^\d+$/.test(trimmed) && trimmed !== "" ? BigInt(trimmed) : 0n;
+  return /^\d+$/.test(trimmed) ? trimmed : undefined;
+}
+
+/** The same fields for arithmetic, where absent means zero rather than nothing. */
+function optional(value: string): bigint {
+  return BigInt(digits(value) ?? 0);
+}
+
+/** A row padded or trimmed to one cell per person, so `map` is never short. */
+function fit(row: boolean[] | undefined, length: number): boolean[] {
+  return Array.from({ length }, (_, i) => row?.[i] ?? false);
 }
 
 function abs(value: bigint): bigint {

@@ -16,6 +16,7 @@
 
 import { isStarkDomain } from "@/lib/identity/encoding";
 import { base64UrlToBytes, bytesToBase64Url } from "@/lib/request/codec";
+import { RATE_SCALE } from "@/lib/quote";
 import { MAX_MEMO_LENGTH } from "@/lib/request/types";
 import { findToken, isValidAddress, normalizeAddress } from "@/lib/strk20/constants";
 import {
@@ -227,6 +228,18 @@ function decodeShare(value: unknown): BillShare {
 }
 
 /**
+ * A rate this build can actually divide with.
+ *
+ * `fiatToTokenUnits` parses the rate at `RATE_SCALE` places and throws on
+ * anything finer, so `^\d+(\.\d+)?$` was too generous: a payload carrying a
+ * ninth decimal decoded cleanly here and then threw out of the page that
+ * renders it — past `/bill/[id]`'s catch, which only wraps the decode, giving a
+ * 500 where the "isn't valid" card belongs. The scale is read from the module
+ * that enforces it so the two cannot drift apart.
+ */
+const RATE_PATTERN = new RegExp(`^\\d+(\\.\\d{1,${RATE_SCALE}})?$`);
+
+/**
  * The fiat context, validated like everything else even though it is only ever
  * displayed. A rate rendering as `NaN` beside a real amount is worse than no
  * rate at all — the reader can't tell which of the two numbers to trust.
@@ -242,7 +255,7 @@ function decodeQuote(value: unknown): FiatQuote {
   }
   if (
     typeof quote.r !== "string" ||
-    !/^\d+(\.\d+)?$/.test(quote.r) ||
+    !RATE_PATTERN.test(quote.r) ||
     Number(quote.r) <= 0
   ) {
     throw new BillDecodeError("Bill link carries an invalid exchange rate.");

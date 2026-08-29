@@ -500,6 +500,15 @@ export default function CreateBillForm({
               setTitle("");
               setShortLink("");
               setShortError("");
+              // `scanned` has to go with the rows it was computed from.
+              // Leaving it behind meant the next bill could be minted carrying
+              // the previous receipt's per-person amounts, with nothing on
+              // screen saying so — `addRow` and `removeRow` clear it for
+              // exactly this reason, and this path is the one that resets more
+              // than either of them.
+              setMode("each");
+              setScanned(null);
+              setError("");
             }}
           >
             Build another

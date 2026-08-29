@@ -176,10 +176,19 @@ Three limits, all of them consequences rather than caveats:
 
 ## Scanning a receipt
 
-Building a bill from a photo sends that photo to Anthropic's API, which reads it
-and returns a list of items and amounts. That is a real disclosure and worth
-stating plainly rather than burying: a receipt carries a place, a time, what was
+Building a bill from a photo sends that photo to a model, which reads it and
+returns a list of items and amounts. That is a real disclosure and worth stating
+plainly rather than burying: a receipt carries a place, a time, what was
 ordered, and often the last four digits of a card.
+
+**Which model, and whose servers, is a deployment's choice.** By default it is
+Anthropic's API. A deployment that sets `ANTHROPIC_BASE_URL` sends the photo to
+that host instead — a gateway, a router, a proxy — and everything below still
+holds of *this* app while none of it says anything about what that operator
+does with what it receives. Their retention and training policy governs from
+that point on, not this document. If you are reading this to decide whether to
+photograph a receipt, the honest answer is that you also need to know who is
+running the deployment and where they pointed it.
 
 What happens to it here:
 
