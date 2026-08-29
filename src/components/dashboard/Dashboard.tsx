@@ -376,7 +376,11 @@ function RequestList() {
   // stale on its own. Poll while the tab is visible, and re-read the moment it
   // becomes visible again rather than making someone wait out an interval.
   useEffect(() => {
-    if (entries.length === 0) return;
+    // A bill is several requests under `<id>-<n>`, so there is no single status
+    // to read for one — its own page does the rollup. Polling `<id>` here would
+    // ask for a key nothing ever writes and badge every bill "Unpaid" forever.
+    const tracked = entries.filter((entry) => entry.shares === undefined);
+    if (tracked.length === 0) return;
 
     // Guarded so a slow response for an earlier entry list can't overwrite the
     // statuses of a newer one.
@@ -384,7 +388,7 @@ function RequestList() {
 
     async function read() {
       const results = await Promise.all(
-        entries.map(async (entry) => {
+        tracked.map(async (entry) => {
           try {
             const response = await fetch(`/api/status/${statusKeyFor(entry)}`);
             if (!response.ok) {
@@ -542,6 +546,19 @@ function RequestList() {
 
       <ul className="mt-4 divide-y divide-[var(--hairline)]">
         {entries.map((entry) => {
+          if (entry.shares !== undefined) {
+            return (
+              <BillRow
+                key={entry.id}
+                entry={entry}
+                onRemove={() => {
+                  removeFromHistory(entry.id);
+                  setEntries(loadHistory());
+                }}
+              />
+            );
+          }
+
           const status = statuses[entry.id] ?? "pending";
           const cycle = entry.schedule
             ? currentInstallment(entry.schedule)
@@ -662,6 +679,65 @@ function RequestList() {
         </p>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * A split bill in the list of links this browser made.
+ *
+ * Deliberately quieter than a request row: no badge, no *Mark received*, no
+ * receipt. Each of those is a statement about one obligation, and a bill is
+ * several — the page behind *Open* is where they're answered one line at a
+ * time, with the status of every line read in a single round trip.
+ */
+function BillRow({
+  entry,
+  onRemove,
+}: {
+  entry: HistoryEntry;
+  onRemove: () => void;
+}) {
+  return (
+    <li className="flex items-center gap-3 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="tabular text-sm font-medium">
+          {formatDisplay(BigInt(entry.amount), DEFAULT_TOKEN.decimals)}{" "}
+          {DEFAULT_TOKEN.symbol}
+          {entry.memo ? (
+            <span className="ml-2 font-normal text-muted">{entry.memo}</span>
+          ) : null}
+        </p>
+        <p className="mt-0.5 text-xs text-muted">
+          Split {entry.shares} ways ·{" "}
+          {new Date(entry.createdAt * 1000).toLocaleDateString()}
+        </p>
+      </div>
+
+      <div className="flex shrink-0 gap-1.5">
+        <button
+          type="button"
+          title="Copy the organiser link — it contains every name and amount"
+          onClick={() => void navigator.clipboard.writeText(entry.url)}
+          className="rounded-lg border border-hairline px-2 py-1 text-xs transition hover:bg-surface-raised"
+        >
+          Copy
+        </button>
+        <Link
+          href={entry.path}
+          className="rounded-lg border border-hairline px-2 py-1 text-xs transition hover:bg-surface-raised"
+        >
+          Open
+        </Link>
+        <button
+          type="button"
+          title="Remove from this browser"
+          onClick={onRemove}
+          className="rounded-lg border border-hairline px-2 py-1 text-xs text-muted transition hover:bg-surface-raised"
+        >
+          ×
+        </button>
+      </div>
+    </li>
   );
 }
 

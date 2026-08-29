@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import CreateRequestForm from "@/components/CreateRequestForm";
 import Card from "@/components/ui/Card";
 
@@ -34,6 +36,14 @@ export default function Home() {
       </section>
 
       <CreateRequestForm />
+
+      <p className="text-sm text-muted">
+        Several people owing different amounts?{" "}
+        <Link href="/bill" className="text-accent underline underline-offset-4">
+          Split a bill
+        </Link>{" "}
+        — one line each, one page showing who has paid.
+      </p>
 
       {/*
         One hairline grid drawn as gaps between opaque tiles, so the dividers

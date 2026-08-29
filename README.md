@@ -10,7 +10,7 @@ record.
 - **Live:** https://whisperpay.vercel.app
 - **Mainnet proof:** [five pool transactions](#mainnet-proof), all
   `ACCEPTED_ON_L1`
-- **Tests:** 89, no external dependencies — `npm test`
+- **Tests:** 212, no test framework — `npm test`
 
 ## The problem, precisely
 
@@ -53,6 +53,9 @@ Two honest limits, because this is easy to overclaim:
 | Paying with an empty balance (deposit + transfer) | the transfer: amount, payer, recipient | the **deposit**: payer's address, token, deposited amount |
 | Withdrawing to a public address | which shielded notes it came from | recipient address and amount |
 | The payment link itself | — | not on-chain, but the URL **is** the invoice: amount, recipient, memo |
+| A split-bill link `/bill/<payload>` | — | not on-chain, and no server holds it, but the URL **is** the whole bill: every name and every share |
+| A short bill link `/b/<id>#<key>` | the bill — the server holds a ciphertext and no key | the id and the fact that *something* was stored |
+| A scanned receipt photo | it is read and dropped — never written to disk, to Redis, or to a log | nothing; the image never goes on-chain or into storage |
 | The status link `/s/<id>` | amount, token, both parties, memo, transaction | one word — unpaid or received — and the date |
 | The recipient's dashboard | read locally with their own viewing key; never sent to a server | nothing |
 | A signed receipt | amount, token, payer — none are in the signed payload | the request id, the claim, the time, the recipient's address |
@@ -126,6 +129,79 @@ And one no format can fix: it is **for cooperative use only**. In a dispute the
 recipient is the party being disputed, and simply won't sign a receipt that
 hurts their case. The verification page tells its reader so.
 
+**6. A split bill is not a new kind of payment.** One person covers the table
+and several people owe different amounts. `/bill` builds the list once; each
+line is then derived into an ordinary v1 payment request with its own
+`/pay/<payload>` link ([`share.ts`](src/lib/bill/share.ts)), so the payer page,
+the plan, the verification and the status store are untouched by the feature.
+The person paying sees an amount and a note — not the bill, not the other names.
+
+The organiser link carries the whole list, which is why the wire format
+([`codec.ts`](src/lib/bill/codec.ts)) is validated as hostilely as a request
+payload is, and why the total is **computed from the lines rather than carried
+next to them**: two numbers that can disagree, in a payload supplied by whoever
+sent the link, is one number too many. Splitting evenly goes through
+largest-remainder allocation ([`allocate.ts`](src/lib/bill/allocate.ts)), so the
+shares add back up to the total exactly instead of leaving the organiser a
+rounding gap — a property test pins it across five hundred random splits.
+
+The organiser page reads every line's status in one round trip (`getMany`) and
+says "3 of 8 paid". That count is derived, never stored: the server still holds
+only `{id, status, timestamps}` per line, and still doesn't know the lines
+belong together.
+
+**7. A short bill link, encrypted before it is stored.** A twenty-line bill is a
+1.8k URL, and chat apps cut long links. `/b/<id>#<key>` is the opt-in fix: the
+payload is encrypted in the browser with a fresh AES-GCM-256 key, the ciphertext
+is stored under a random id, and the key goes after the `#` — the part of a URL
+browsers never transmit. A real bill measured end to end: 80 characters against
+531.
+
+What the server gains is the ability to *lose* a bill, not to read one. So the
+stateless link stays the default, the short one says plainly that it expires,
+and where no store is configured the option is not offered at all and the
+endpoint refuses to mint one — a short link backed by process memory works once
+and looks identical to one that works. [`crypto.ts`](src/lib/bill/crypto.ts)
+carries the round trip; its tests cover the wrong key, the tampered ciphertext
+and the truncated link, since GCM answers all three the same way and each has to
+reach the reader as a sentence rather than a blank page.
+
+**8. A receipt photo becomes a bill, and the model never gets the last word.**
+Typing eight lines off a receipt is where people give up before the links exist,
+so `/bill` will read the photo instead: `claude-opus-5` returns a structured
+list of items and amounts ([`scan.ts`](src/lib/ai/scan.ts)), each item is
+tapped onto the people who ate it, and tax and service are pro-rated by what
+each person had.
+
+Three things are structural rather than cosmetic, because a receipt read from a
+photo of a creased warung bill *will* misread a line:
+
+- **The image is never stored.** Not to disk, not to Redis, not to a log, and
+  not into an error message. There is nowhere for it to go, which is a stronger
+  guarantee than a deletion policy.
+- **Every number stays editable, and a total that disagrees is shown, not
+  fixed.** [`notaTotals`](src/lib/ai/nota.ts) returns the difference between
+  what the lines add up to and what the receipt printed; the UI shows it as a
+  warning. Silently adjusting the lines to match would erase the one signal
+  that the scan went wrong.
+- **The answer is rebuilt field by field, not cast.** A schema constrains
+  generated output; it doesn't guarantee it. Amounts must be integer strings in
+  the currency's smallest unit — a JSON number for a rupiah figure is a float,
+  and a float in a money path is the failure this codebase is built to avoid.
+
+Currency conversion has the same shape as the split itself: the **whole**
+receipt is converted once and then divided with `allocate`
+([`quote.ts`](src/lib/quote.ts)), because converting each person separately
+floors each of them down and leaves the organiser carrying the remainder. The
+rate is locked into the payload and refused if it is over ten minutes old — and
+what the link asks for is always the STRK figure, with the rupiah beside it as
+context that does not follow the market.
+
+The endpoint is the only one here that costs money to answer, so it is
+rate-limited per caller, size-capped, and restricted to image types; the browser
+downscales before it uploads. With no `ANTHROPIC_API_KEY` the mode is not
+offered and the route answers 503 — the rest of the bill flow is unchanged.
+
 ## What's actually distinctive
 
 Measured against a baseline STRK20 payment app, four things:
@@ -160,6 +236,13 @@ Following [Private Sprint (STRK20)](https://strk20.starknet.io/hackathon), Aug 1
 * ✅ **M4** — recurring requests (subscriptions / repeat invoices)
 * ✅ **M5** — stretch: public status page per link, no amount and no parties
 * ✅ **M6** — stretch: signed receipts anyone can verify
+* ✅ **M7** — stretch: split bill — one organiser link, a normal payment link each
+* ✅ **M8** — stretch: short bill links, encrypted in the browser (`/b/<id>#<key>`)
+* ✅ **M9** — stretch: read a receipt photo into a bill, with tap-to-assign
+
+The v2 plan in [`plans/`](plans/) numbers split bill **M6**, short links **M7**
+and receipt scanning **M8**; they are M7-M9 here because M5 and M6 were already
+spent on the two stretch milestones above.
 
 ## Architecture
 
@@ -259,13 +342,19 @@ node scripts/strk20-json.mjs --check
 
 ## Status, and what's left
 
-M1–M6 are built and running against mainnet. The app is deployed, the five
+M1–M9 are built and running against mainnet. The app is deployed, the five
 transactions are verified and recorded.
 
 **Still open before the deadline:**
 
 - [ ] **Demo video (≤3 min)** — the one remaining requirement for scoring.
       `node scripts/strk20-json.mjs --video <url>` records it.
+- [ ] **A Redis for the deployment.** Set `KV_REST_API_URL` +
+      `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_*`) and redeploy. Without it
+      the deployed app falls back to process memory, so a request can report
+      `confirmed` from one function while `/s/<id>` still reads "Awaiting
+      payment" from another — and short bill links switch themselves off. Paying
+      is unaffected either way; it never touches the store.
 
 **Known limits, stated rather than hidden:**
 
