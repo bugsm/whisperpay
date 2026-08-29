@@ -35,8 +35,43 @@ import {
  * accuracy is worth more than the per-scan cost. `claude-haiku-4-5` is the
  * lever if volume ever makes that trade wrong — a decision to take consciously
  * then, not a quiet default now.
+ *
+ * `ANTHROPIC_MODEL` overrides it, because a deployment pointed at a gateway
+ * (below) reaches models under whatever names that gateway gives them.
  */
-const MODEL = "claude-opus-5";
+const DEFAULT_MODEL = "claude-opus-5";
+
+/**
+ * Where the request goes.
+ *
+ * Anthropic, unless a deployment says otherwise. A key issued by an
+ * Anthropic-compatible gateway is not an Anthropic key, so leaving this at the
+ * default with such a key in hand produces a 401 that reads exactly like a
+ * wrong key — the endpoint has to move together with the credential.
+ *
+ * Setting it is a privacy decision before it is a configuration one: receipt
+ * photos then reach whoever operates that host, under their retention policy
+ * rather than Anthropic's. `docs/PRIVACY.md` says so to the reader, and it is
+ * only true while it matches what is deployed.
+ */
+function endpoint(): string | undefined {
+  return process.env.ANTHROPIC_BASE_URL?.trim() || undefined;
+}
+
+/**
+ * The endpoint's hostname, for the log line below. The host and not the URL:
+ * some gateways carry a token in the path, and a diagnostic that leaks the
+ * credential it is diagnosing is worse than no diagnostic.
+ */
+function host(): string {
+  const base = endpoint();
+  if (!base) return "api.anthropic.com";
+  try {
+    return new URL(base).host;
+  } catch {
+    return "unparseable ANTHROPIC_BASE_URL";
+  }
+}
 
 /**
  * Enough room for a long receipt and the thinking that reads it. Comfortably
@@ -125,12 +160,12 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
     throw new NotaConfigError("Receipt scanning isn't configured on this deployment.");
   }
 
-  const client = new Anthropic({ apiKey });
+  const client = new Anthropic({ apiKey, baseURL: endpoint() });
 
   let response: Anthropic.Message;
   try {
     response = await client.messages.create({
-      model: MODEL,
+      model: process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_MODEL,
       max_tokens: MAX_TOKENS,
       system: SYSTEM,
       output_config: {
@@ -166,10 +201,14 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
       console.error(
         "[nota] the API key was refused:",
         JSON.stringify({
+          // The host first: a gateway key sent to `api.anthropic.com` is the
+          // likeliest way to arrive here, and it is the one thing the message
+          // above cannot distinguish from a key that is simply wrong.
+          host: host(),
           length: apiKey.length,
           hadSurroundingWhitespace:
             apiKey.length !== (process.env.ANTHROPIC_API_KEY?.length ?? 0),
-          looksLikeAnApiKey: apiKey.startsWith("sk-ant-api"),
+          looksLikeAnAnthropicKey: apiKey.startsWith("sk-ant-api"),
         })
       );
       throw new NotaConfigError(
