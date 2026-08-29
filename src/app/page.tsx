@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import CreateRequestForm from "@/components/CreateRequestForm";
+import { buttonClass } from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 
 const STEPS = [
@@ -35,15 +36,27 @@ export default function Home() {
         </p>
       </section>
 
-      <CreateRequestForm />
+      {/*
+        The bill route used to be a sentence *below* the form, which put the
+        second of the two things this app does underneath the fold of the first.
+        It sits above the form now, and close to it — the `space-y-3` is what
+        makes it read as an alternative to this form rather than a stray
+        navigation button. It stays `secondary`: the primary weight on the page
+        belongs to "Create payment link", and two accent-filled buttons would
+        leave neither of them looking like the main path.
+      */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted">
+            Several people owing different amounts?
+          </p>
+          <Link href="/bill" className={buttonClass("secondary")}>
+            Split a bill
+          </Link>
+        </div>
 
-      <p className="text-sm text-muted">
-        Several people owing different amounts?{" "}
-        <Link href="/bill" className="text-accent underline underline-offset-4">
-          Split a bill
-        </Link>{" "}
-        — one line each, one page showing who has paid.
-      </p>
+        <CreateRequestForm />
+      </div>
 
       {/*
         One hairline grid drawn as gaps between opaque tiles, so the dividers
