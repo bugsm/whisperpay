@@ -148,6 +148,44 @@ export interface ScanInput {
   mediaType: NotaMediaType;
 }
 
+/**
+ * The model's answer as text, whatever envelope it arrived in.
+ *
+ * `content` is a list of blocks in the API's contract, and that is the only
+ * shape this reads deliberately. But a gateway standing in for that API is only
+ * obliged to return HTTP 200, and some flatten the list to a plain string on
+ * the way through — cheap to accept, and safe, because whatever comes out still
+ * has to survive `JSON.parse` and then `parseNota`, which rebuilds the receipt
+ * field by field and trusts none of it.
+ *
+ * Anything else is refused rather than guessed at, and the keys are logged: an
+ * envelope this doesn't know is a fact about the deployment's endpoint, and the
+ * operator can't act on it without being told what actually came back. Keys
+ * only — the values are the model's answer, and one of the receipt's lines has
+ * no business in a log.
+ *
+ * Returns `undefined` for an envelope it can't read, `""` for one that carried
+ * no text. The two are different failures and get different sentences.
+ */
+function readText(response: Anthropic.Message): string | undefined {
+  if (Array.isArray(response.content)) {
+    return response.content.find((block) => block.type === "text")?.text ?? "";
+  }
+
+  if (typeof response.content === "string") return response.content;
+
+  console.error(
+    "[nota] unrecognised response envelope:",
+    JSON.stringify({
+      host: host(),
+      contentType: typeof response.content,
+      keys:
+        response && typeof response === "object" ? Object.keys(response) : null,
+    })
+  );
+  return undefined;
+}
+
 export async function scanNota(image: ScanInput): Promise<ScannedNota> {
   // Trimmed, and passed explicitly rather than left to the SDK's own read of
   // the environment. A key pasted into a hosting dashboard picks up a trailing
@@ -253,22 +291,13 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
     );
   }
 
-  // `content` is an array in the API's contract, but a gateway standing in for
-  // that API only has to return HTTP 200 — and `.find` on whatever else it
-  // sends throws a TypeError with no class the route can read. Checked rather
-  // than assumed, so a non-conforming upstream arrives as a sentence.
-  if (!Array.isArray(response.content)) {
-    console.error(
-      "[nota] the response had no content array:",
-      JSON.stringify({ host: host(), got: typeof response.content })
-    );
+  const text = readText(response);
+  if (text === undefined) {
     throw new NotaOutputError(
       "The scanner answered in a shape this app doesn't understand."
     );
   }
-
-  const text = response.content.find((block) => block.type === "text")?.text;
-  if (!text) {
+  if (text === "") {
     throw new NotaOutputError("The scanner returned nothing to read.");
   }
 
