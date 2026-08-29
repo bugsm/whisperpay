@@ -114,11 +114,18 @@ export interface ScanInput {
 }
 
 export async function scanNota(image: ScanInput): Promise<ScannedNota> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  // Trimmed, and passed explicitly rather than left to the SDK's own read of
+  // the environment. A key pasted into a hosting dashboard picks up a trailing
+  // newline more often than not — from a `cat`, from a copied line, from the
+  // textarea itself — and that byte goes straight into the `x-api-key` header,
+  // where the API answers 401. The failure then reads as "the key is wrong"
+  // when the key is right and only its whitespace is not.
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) {
     throw new NotaConfigError("Receipt scanning isn't configured on this deployment.");
   }
 
-  const client = new Anthropic();
+  const client = new Anthropic({ apiKey });
 
   let response: Anthropic.Message;
   try {
@@ -153,6 +160,18 @@ export async function scanNota(image: ScanInput): Promise<ScannedNota> {
     // The SDK's typed classes, most specific first — never the text of a
     // message, which is not a contract.
     if (error instanceof Anthropic.AuthenticationError) {
+      // Whoever is reading the deployment log is the one who can fix this, and
+      // "the key was refused" alone doesn't tell them which way it is wrong.
+      // Shape only — never the key, and never any part of it.
+      console.error(
+        "[nota] the API key was refused:",
+        JSON.stringify({
+          length: apiKey.length,
+          hadSurroundingWhitespace:
+            apiKey.length !== (process.env.ANTHROPIC_API_KEY?.length ?? 0),
+          looksLikeAnApiKey: apiKey.startsWith("sk-ant-api"),
+        })
+      );
       throw new NotaConfigError(
         "Receipt scanning is misconfigured on this deployment — its API key was refused."
       );
