@@ -624,6 +624,22 @@ export default function CreateBillForm({
                   onApply={(result) => {
                     setScanned(result);
                     setError("");
+                    // The note can name people this form has never seen, so the
+                    // rows are rewritten from the result rather than matched
+                    // against it — `result.amounts[i]` is `result.names[i]`'s,
+                    // and lining them up by position is what would break.
+                    // Anything already typed for a name that survives is kept:
+                    // a memo the organiser wrote is theirs.
+                    setRows((current) =>
+                      result.names.map((label) => {
+                        const existing = current.find(
+                          (row) =>
+                            row.label.trim().toLowerCase() ===
+                            label.trim().toLowerCase()
+                        );
+                        return { ...BLANK, ...existing, label };
+                      })
+                    );
                     // Offered, not imposed: a title the organiser already typed
                     // is theirs and stays.
                     if (title.trim() === "" && result.title) setTitle(result.title);

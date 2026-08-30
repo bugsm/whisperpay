@@ -7,7 +7,8 @@ import {
   NotaScanError,
   NotaUpstreamError,
 } from "@/lib/ai/nota";
-import { scanNota } from "@/lib/ai/scan";
+import { scanConfigured } from "@/lib/ai/credential";
+import { MAX_DINERS_LENGTH, scanNota } from "@/lib/ai/scan";
 import { callerKey, rateLimit } from "@/lib/store/ratelimit";
 
 /**
@@ -51,7 +52,7 @@ const SCAN_LIMIT = 6;
 const SCAN_WINDOW_SECONDS = 600;
 
 export async function POST(request: NextRequest) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!scanConfigured()) {
     return Response.json(
       {
         error:
@@ -97,6 +98,22 @@ export async function POST(request: NextRequest) {
   if (input.image.length > MAX_IMAGE_CHARS) {
     return fail("That image is too large. Take the photo again at a lower resolution.");
   }
+  // Optional, and refused rather than silently truncated: someone who pasted a
+  // long note deserves to know it was cut, and a length check is the whole of
+  // the validation this needs. The note is free text on purpose — it is the
+  // organiser describing their own table — and it reaches the model fenced as
+  // data rather than as instructions. See `scan.ts`.
+  if (input.diners !== undefined) {
+    if (typeof input.diners !== "string") {
+      return fail("`diners` must be a string.");
+    }
+    if (input.diners.length > MAX_DINERS_LENGTH) {
+      return fail(
+        `That note is longer than ${MAX_DINERS_LENGTH} characters. Shorten it, or tap the names instead.`
+      );
+    }
+  }
+
   // Checked before it is forwarded: standard base64, optionally padded.
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(input.image)) {
     return fail("`image` isn't valid base64.");
@@ -106,6 +123,7 @@ export async function POST(request: NextRequest) {
     const nota = await scanNota({
       data: input.image,
       mediaType: input.mediaType,
+      diners: typeof input.diners === "string" ? input.diners : undefined,
     });
     return Response.json({ nota });
   } catch (error) {
@@ -123,6 +141,21 @@ export async function POST(request: NextRequest) {
     if (error instanceof NotaScanError) {
       return Response.json({ error: error.message }, { status: 500 });
     }
+    // Nothing in the typed chain matched, so this is a failure the code has no
+    // account of — the one case where the reader is told the least and the
+    // operator needs the most. It went unlogged, which made "didn't recognise"
+    // true of the deployment log as well as of the message.
+    //
+    // Class and message only. The SDK puts the *response* in an error message,
+    // never the request, so the photo cannot appear here — and the message is
+    // cut short anyway, because that guarantee is worth holding by construction
+    // rather than by argument.
+    console.error(
+      "[nota] unrecognised failure:",
+      error instanceof Error
+        ? `${error.constructor.name}: ${error.message.slice(0, 500)}`
+        : typeof error
+    );
     return Response.json(
       { error: "The scan failed for a reason this server didn't recognise." },
       { status: 500 }
