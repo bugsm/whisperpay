@@ -16,6 +16,7 @@ import {
   quoteAgeSeconds,
 } from "@/lib/quote";
 import { formatDisplay } from "@/lib/amount";
+import { readRouteBody, routeErrorMessage } from "@/lib/routeError";
 import { DEFAULT_TOKEN } from "@/lib/strk20/constants";
 
 /**
@@ -45,6 +46,23 @@ const MAX_NOTE_LENGTH = 2000;
 /** What the browser sends: a downscaled photo, small enough to post. */
 const MAX_DIMENSION = 1600;
 const JPEG_QUALITY = 0.85;
+
+/**
+ * How long the scan is given before the page stops waiting for it.
+ *
+ * `fetch` rejects on a connection that resets and waits forever on one that
+ * merely stalls — a phone changing cells does the second — so without this
+ * the failure path never runs at all: no message, `busy` stuck on, and the
+ * file input disabled, which is the one control the reader would use to try
+ * again.
+ *
+ * Past the route's own `maxDuration` of 60s, not under it. A receipt takes
+ * the model 20-40 seconds to read, and a client that gave up first would
+ * abandon scans that were about to succeed while still billing for them.
+ * Fifteen seconds of margin means anything this cuts off is something the
+ * platform has already killed.
+ */
+const SCAN_TIMEOUT_MS = 75_000;
 
 interface Draft {
   merchant?: string;
@@ -106,14 +124,48 @@ export default function ScanNota({
     try {
       const image = await downscale(file);
       const diners = note.trim();
-      const response = await fetch("/api/nota/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(diners === "" ? image : { ...image, diners }),
-      });
-      const body = await response.json();
+      // `AbortController` and a timer rather than `AbortSignal.timeout`, which
+      // Safari only learned in 16 and older Android WebViews never did. On
+      // those browsers the shorthand throws a `TypeError` before the request
+      // is built, inside the catch below — so a browser that is merely old
+      // would be told its connection dropped, and every retry would say the
+      // same thing. This pair is as old as `fetch` itself, and it is what the
+      // rest of this app's forms use.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), SCAN_TIMEOUT_MS);
+
+      // Only the request itself is caught here. Everything after it is this
+      // page's own code, and routing a bug in that through the connection
+      // message below would blame the network for something it didn't do.
+      let response: Response;
+      try {
+        response = await fetch("/api/nota/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(diners === "" ? image : { ...image, diners }),
+          signal: controller.signal,
+        });
+      } catch {
+        throw new ScannerUnreachable();
+      } finally {
+        // The scan is the last thing this handler waits on, but the timer
+        // would otherwise outlive it by a minute and abort nothing.
+        clearTimeout(timer);
+      }
+      // Read before the status is, and defensively — see `readRouteBody`.
+      // Letting a non-JSON body throw here would send it to the catch below,
+      // which would tell the reader their request never left. It did leave,
+      // and the scan may well have been billed for it.
+      const body = await readRouteBody(response);
+
       if (!response.ok) {
-        setError(body.error ?? "The scan failed.");
+        setError(
+          routeErrorMessage(body) ?? `The scan failed (${response.status}).`
+        );
+        return;
+      }
+      if (!body.nota) {
+        setError("The scanner answered with something this page couldn't read.");
         return;
       }
 
@@ -132,8 +184,8 @@ export default function ScanNota({
       setNames(scannedNames);
       setWeights(gridFrom(nota.items, scannedNames ?? people));
       void loadQuote(nota.currency);
-    } catch {
-      setError("Couldn't read that image in this browser. Try a different photo.");
+    } catch (cause) {
+      setError(scanFailureMessage(cause, file));
     } finally {
       setBusy(false);
     }
@@ -143,10 +195,12 @@ export default function ScanNota({
     setQuoteError("");
     try {
       const response = await fetch(`/api/quote?currency=${encodeURIComponent(currency)}`);
-      const body = await response.json();
+      const body = await readRouteBody(response);
       if (!response.ok) {
         setQuote(null);
-        setQuoteError(body.error ?? "No exchange rate is available right now.");
+        setQuoteError(
+          routeErrorMessage(body) ?? "No exchange rate is available right now."
+        );
         return;
       }
       setQuote(body.quote as FiatQuote);
@@ -367,7 +421,13 @@ export default function ScanNota({
             accept="image/jpeg,image/png,image/webp"
             disabled={busy}
             onChange={(event) => {
-              const file = event.target.files?.[0];
+              const input = event.target;
+              const file = input.files?.[0];
+              // Cleared as soon as the file is in hand. A file input fires no
+              // `change` when the same file is picked again, and every failure
+              // message here ends in "try again" — without this, taking that
+              // advice with the same photo does nothing at all.
+              input.value = "";
               if (file) void handleFile(file);
             }}
             className="block w-full text-xs file:mr-3 file:border-2 file:border-hairline file:bg-surface-raised file:px-3 file:py-2 file:text-xs file:text-foreground"
@@ -668,6 +728,82 @@ function abs(value: bigint): bigint {
 }
 
 /**
+ * The browser has no decoder for this file.
+ *
+ * Kept apart from every other way a scan can fail, because it is the one the
+ * reader can actually do something about — and the advice is the opposite of
+ * the generic one. "Try a different photo" is wrong here: no photo they take
+ * will decode, since it is the format the browser can't read, not the picture.
+ */
+class UndecodableImage extends Error {}
+
+/**
+ * The browser wouldn't let the photo be resized on a canvas.
+ *
+ * Nothing to do with the file — a fingerprinting blocker refusing the context
+ * or the readout, or Safari on iOS out of canvas memory. Separate from
+ * `UndecodableImage` because the format advice below would be wrong here: the
+ * photo is fine, and converting it changes nothing.
+ */
+class UnusableCanvas extends Error {}
+
+/**
+ * The request to the scanner never came back.
+ *
+ * `fetch` rejects the same way whether the photo never left the device and
+ * whether the connection dropped thirty seconds in, while the model was
+ * reading it — and in the second case the scan ran and was billed. Nothing
+ * the browser hands back distinguishes them, so the message below doesn't
+ * pretend to: it says a retry may cost a second scan, which is the part the
+ * reader can act on.
+ */
+class ScannerUnreachable extends Error {}
+
+/**
+ * Browsers disagree about what a HEIC is called, and some report nothing at
+ * all for one, so the name is checked as well as the type.
+ */
+function looksLikeHeic(file: File): boolean {
+  return /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
+}
+
+/**
+ * Why the scan didn't happen, in terms the reader can act on.
+ *
+ * Four outcomes rather than one, because the advice differs and the wrong
+ * advice costs real effort. A browser with no decoder for the format is the
+ * reader's to route around; a blocked canvas is about the browser rather than
+ * the file; a photo that decoded but read badly is answered by the route in
+ * its own words and never reaches here; and a connection that dropped is not
+ * about the photo at all. "Try a different photo" sent over a dropped
+ * connection sends someone back to the camera to fix a problem the camera has
+ * no part in.
+ */
+function scanFailureMessage(cause: unknown, file: File): string {
+  if (cause instanceof UndecodableImage) {
+    // The advice leads with converting to JPEG because that is the one action
+    // available everywhere. The browsers that actually fail on a HEIC are
+    // desktop Chrome and Firefox, where "open it in Safari" and "pick it from
+    // Photos" are not things the reader can do — those belong second, for the
+    // iPhone that produced the file rather than the machine reading it.
+    return looksLikeHeic(file)
+      ? "This browser can't read HEIC, the format iPhones photograph in. Convert the photo to JPEG and try again — on an iPhone, picking it from Photos rather than Files converts it on the way out."
+      : "Couldn't read that image in this browser. Try a different photo.";
+  }
+  if (cause instanceof UnusableCanvas) {
+    return "This browser wouldn't let the page resize the photo on a canvas — a privacy extension is the usual cause. Try another browser, or allow canvas for this page.";
+  }
+  if (cause instanceof ScannerUnreachable) {
+    // No promise that the photo stayed put: it may have arrived and been read
+    // before the connection went, in which case that scan was billed and
+    // counted, and a retry costs another one out of the ten-minute allowance.
+    // Saying so is worth more than the reassurance it replaces.
+    return "Lost the connection to the scanner. Check it and try again — if the photo had already gone out, the retry counts as a second scan.";
+  }
+  return "Something went wrong handling that scan. Try again.";
+}
+
+/**
  * Shrink a phone photo before it is posted.
  *
  * A modern camera produces four megabytes of receipt, which is more than a
@@ -676,7 +812,12 @@ function abs(value: bigint): bigint {
  * typical receipt in a few hundred kilobytes.
  */
 async function downscale(file: File): Promise<{ image: string; mediaType: string }> {
-  const bitmap = await createImageBitmap(file);
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new UndecodableImage();
+  }
   const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
   const width = Math.round(bitmap.width * scale);
   const height = Math.round(bitmap.height * scale);
@@ -684,11 +825,26 @@ async function downscale(file: File): Promise<{ image: string; mediaType: string
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("no 2d context");
-  context.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
 
-  const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+  // The whole canvas round trip is guarded, not just `getContext`. Blockers
+  // disagree about where to refuse: some hand back no context, others hand
+  // back a working one and throw a `SecurityError` from `toDataURL`, and iOS
+  // runs out of canvas memory at the readout too. All of them are the same
+  // thing to the reader, and all of them used to reach the generic message.
+  let dataUrl: string;
+  try {
+    const context = canvas.getContext("2d");
+    if (!context) throw new UnusableCanvas();
+    context.drawImage(bitmap, 0, 0, width, height);
+    dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+  } catch {
+    throw new UnusableCanvas();
+  } finally {
+    // Whichever way that went. This is a full-resolution decode of a phone
+    // photo — tens of megabytes — and the failure path is the one that ends
+    // in a retry, so leaking it once per attempt adds up fast.
+    bitmap.close();
+  }
+
   return { image: dataUrl.split(",")[1], mediaType: "image/jpeg" };
 }

@@ -7,6 +7,7 @@ import {
   NotaScanError,
   NotaUpstreamError,
 } from "@/lib/ai/nota";
+import { scanConfigured } from "@/lib/ai/credential";
 import { MAX_DINERS_LENGTH, scanNota } from "@/lib/ai/scan";
 import { callerKey, rateLimit } from "@/lib/store/ratelimit";
 
@@ -51,7 +52,7 @@ const SCAN_LIMIT = 6;
 const SCAN_WINDOW_SECONDS = 600;
 
 export async function POST(request: NextRequest) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!scanConfigured()) {
     return Response.json(
       {
         error:

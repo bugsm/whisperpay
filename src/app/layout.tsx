@@ -35,8 +35,21 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <header className="border-b-2 border-hairline bg-surface">
           <div className="mx-auto flex w-full max-w-3xl items-center gap-4 px-5 py-4">
             <Link href="/" className="display flex items-center gap-2.5 text-base">
-              {/* A square, not a glowing dot — the old mark was a soft radial. */}
-              <span aria-hidden className="size-2.5 bg-accent" />
+              {/*
+                The PNG, not `whislogo.svg` beside it. That file is an
+                auto-trace — ~979 paths at 2048x2048 — which is the right master
+                to keep and the wrong thing to make a browser parse and
+                rasterise to fill 28 square pixels. Rendered at 96px, it is
+                sharp past 3x and costs a few kilobytes instead of 200.
+              */}
+              <img
+                src="/whislogo.png"
+                alt=""
+                aria-hidden
+                width={28}
+                height={28}
+                className="size-7 shrink-0"
+              />
               Whisper&nbsp;Pay
             </Link>
             <nav className="ml-auto flex items-center gap-4 text-sm text-muted">

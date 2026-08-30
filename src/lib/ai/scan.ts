@@ -11,6 +11,8 @@ import {
   type ScannedNota,
 } from "./nota";
 
+import { credential } from "./credential";
+
 /**
  * Sending one receipt photo to the model.
  *
@@ -272,42 +274,6 @@ function readText(response: Anthropic.Message): string | undefined {
   return undefined;
 }
 
-/**
- * The credential, and which header it travels in.
- *
- * Two conventions meet here. Anthropic authenticates with `x-api-key`, which is
- * what the SDK sends for `apiKey`. A gateway standing in for it usually wants
- * the bearer convention instead, and the SDK sends `Authorization: Bearer` for
- * `authToken` — selected by `ANTHROPIC_AUTH_TOKEN`, the variable those
- * gateways' own setup instructions hand out. Sending the wrong one of the two
- * is a 401 that reads exactly like a wrong credential.
- *
- * `ANTHROPIC_AUTH_TOKEN` wins when both are set: a deployment that went to the
- * trouble of setting it means the bearer header, and the other variable is
- * usually the same string copied twice because an instruction said to.
- *
- * Trimmed, and read here rather than left to the SDK's own read of the
- * environment. A key pasted into a hosting dashboard picks up a trailing
- * newline more often than not — from a `cat`, from a copied line, from the
- * textarea itself — and that byte goes straight into the header, where the API
- * answers 401. The failure then reads as "the credential is wrong" when it is
- * right and only its whitespace is not.
- */
-type Credential = { header: "bearer" | "x-api-key"; value: string; raw: string };
-
-function credential(): Credential | undefined {
-  const bearer = process.env.ANTHROPIC_AUTH_TOKEN;
-  if (bearer?.trim()) {
-    return { header: "bearer", value: bearer.trim(), raw: bearer };
-  }
-
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (key?.trim()) {
-    return { header: "x-api-key", value: key.trim(), raw: key };
-  }
-
-  return undefined;
-}
 
 /**
  * The sentence the upstream actually wrote.

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import CreateBillForm from "@/components/bill/CreateBillForm";
 import Card from "@/components/ui/Card";
+import { scanConfigured } from "@/lib/ai/credential";
 import { getBillStore } from "@/lib/store/blobs";
 
 export const metadata: Metadata = {
@@ -37,13 +38,15 @@ export default function NewBillPage() {
         Offering it and failing later would hand someone a link that works once.
       */}
       {/*
-        Trimmed for the same reason `scanNota` trims: a key that is nothing but
-        whitespace is truthy here and empty there, which is the one combination
-        that offers the mode and then refuses it.
+        Asked of `scanConfigured` rather than read from the environment here:
+        the endpoint gates on the same predicate, so the mode cannot be offered
+        by this page and then refused by that route. It trims for the reason
+        `scanNota` trims — a credential that is nothing but whitespace is truthy
+        to a `Boolean` and empty to a header.
       */}
       <CreateBillForm
         canShorten={getBillStore().durable}
-        canScan={Boolean(process.env.ANTHROPIC_API_KEY?.trim())}
+        canScan={scanConfigured()}
       />
 
       <Card>

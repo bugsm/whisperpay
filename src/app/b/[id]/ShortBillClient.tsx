@@ -14,6 +14,7 @@ import { sharePath, shareStatusId } from "@/lib/bill/share";
 import { rowStatus } from "@/lib/bill/status";
 import { billTotal, type SplitBill } from "@/lib/bill/types";
 import { isExpired, type RequestStatus } from "@/lib/request/types";
+import { readRouteBody, routeErrorMessage } from "@/lib/routeError";
 import { DEFAULT_TOKEN, findToken } from "@/lib/strk20/constants";
 
 /**
@@ -70,7 +71,7 @@ export default function ShortBillClient({ id }: { id: string }) {
       }
 
       if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
+        const body = await readRouteBody(response);
         return {
           state: "failed" as const,
           title:
@@ -78,7 +79,7 @@ export default function ShortBillClient({ id }: { id: string }) {
               ? "This short link has expired"
               : "This short link couldn't be opened",
           detail:
-            body.error ??
+            routeErrorMessage(body) ??
             "A short link is stored for a limited time. The full bill link never expires — ask whoever sent this for that one.",
         };
       }

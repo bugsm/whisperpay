@@ -127,10 +127,24 @@ Whisper Pay's backend is deliberately thin.
   "3 of 8 paid" count on the bill page is computed from those records while it
   renders, and never written anywhere.
 - **A short-linked bill is stored, and stored encrypted.** Choosing the short
-  link is the one action in this app that puts something of yours on the server.
-  What lands there is a ciphertext it has no key for — see the section below.
+  link is one of the two actions in this app that put something of yours on the
+  server. What lands there is a ciphertext it has no key for — see the section
+  below.
 - **A receipt photo is read and dropped.** It is sent to the model that reads
   it and is never written anywhere — see the section below.
+- **Scanning a receipt counts you for ten minutes, without recording who you
+  are.** That is the other one. The scan endpoint is the only one here that
+  costs money to answer, so it is rate-limited per caller — but what reaches
+  the store is a salted digest of your address rather than the address, and the
+  window is folded into it, so the same person digests to something different
+  ten minutes later. Nothing reads the value back; it exists to be counted
+  against. What that leaves in Redis is a number under an opaque key, expiring
+  within seconds of its window — not the photo, not the bill, and nothing that
+  links two requests across windows. `RATELIMIT_SALT` is what makes the digest
+  irreversible: without it set, an address can be recovered by hashing the 2^32
+  IPv4 space, so a deployment that leaves it unset is storing something
+  obfuscated rather than something private, and the app says so in its log.
+  Scanning is opt-in; the other two ways of building a bill write nothing.
 - **The server never sees a viewing key or a private key.** Every pool operation
   goes through the user's wallet via the STRK20 Wallet API.
 
@@ -196,6 +210,12 @@ What happens to it here:
   logged, and not included in any error message. It exists for the length of one
   request. There is no code path that keeps it, which is a stronger statement
   than a policy that says it is deleted.
+- **The request that carried it is counted, though.** The photo stays out of the
+  Redis above; a rate-limit counter does not, and lives there for ten minutes.
+  It is keyed by a salted digest of your address rather than the address itself,
+  and it rotates with the window — but saying the image is never stored while
+  staying quiet about the counter would be true by the letter and misleading in
+  the way that matters, so it is spelled out under *What the server knows*.
 - **It is never linked to a bill.** The scan and the link-minting are separate
   steps; nothing associates the image with the bill that comes out of it,
   because nothing holds the image at all.

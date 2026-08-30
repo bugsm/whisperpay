@@ -1,22 +1,29 @@
 # Whisper Pay
 
-**Send someone a link to get paid — without publishing what you charged them.**
+**Send someone a link to get paid — without publishing what you charged them.
+Photograph a receipt, and a model splits it into one private link per person.**
 
 A payment link is the easiest way to invoice someone and the worst way to keep
 it private. Whisper Pay keeps the link and routes the money through the STRK20
 privacy pool, so the amount, the payer and the recipient stay off the public
 record.
 
-- **The flow:** [photograph a receipt, everyone pays privately](#photograph-a-receipt-and-everyone-pays-privately)
+And the part people actually quit over — typing eight lines off a receipt and
+working out who owes what — is done by a model instead. One photo becomes a
+**split bill**, and each share leaves as its own private payment link.
+
+- **The flow:** [AI split bill — one photo, a private link each](#ai-split-bill--photograph-a-receipt-and-everyone-pays-privately)
 - **Live:** https://whisperpay.vercel.app
 - **Mainnet proof:** [five pool transactions](#mainnet-proof), all
   `ACCEPTED_ON_L1`
-- **Tests:** 233, no test framework — `npm test`
+- **Tests:** 247, no test framework — `npm test`
 
-## Photograph a receipt, and everyone pays privately
+## AI split bill — photograph a receipt, and everyone pays privately
 
 The flow the app is built around, end to end — one photo to a private payment
-link per person:
+link per person. `claude-haiku-4-5` reads the receipt, the organiser says who
+had what in plain words, and the split, the currency conversion and the links
+are derived from there:
 
 ```
   a photo of the receipt
@@ -96,6 +103,7 @@ Two honest limits, because this is easy to overclaim:
 | A split-bill link `/bill/<payload>` | — | not on-chain, and no server holds it, but the URL **is** the whole bill: every name and every share |
 | A short bill link `/b/<id>#<key>` | the bill — the server holds a ciphertext and no key | the id and the fact that *something* was stored |
 | A scanned receipt photo | it is read and dropped — never written to disk, to Redis, or to a log | nothing; the image never goes on-chain or into storage |
+| The request that carried that photo | the photo, your address, and any link between one request and the next | a rate-limit **count**, under a salted digest that rotates every ten minutes — nothing on-chain |
 | The status link `/s/<id>` | amount, token, both parties, memo, transaction | one word — unpaid or received — and the date |
 | The recipient's dashboard | read locally with their own viewing key; never sent to a server | nothing |
 | A signed receipt | amount, token, payer — none are in the signed payload | the request id, the claim, the time, the recipient's address |
@@ -256,11 +264,13 @@ Measured against a baseline STRK20 payment app, five things:
 - **The meter is pre-signature UI, not a backend decision.** The payer sees what
   this specific transaction will publish, quoting its own figures, while they
   can still change it.
-- **A receipt photo becomes private payment links, in one flow.** The scan
-  reads the lines, a note in the organiser's own words assigns them, the
+- **An AI split bill that ends in private payment links, in one flow.** The
+  scan reads the lines, a note in the organiser's own words assigns them, the
   whole bill is converted to STRK once at a locked rate, and each share
   leaves as an ordinary request the payer page already knows how to pay. No
-  other step in that chain knows the feature exists.
+  other step in that chain knows the feature exists. Splitting a bill with a
+  model is not new; ending that split in payments nobody can read off the
+  chain is.
 - **A receipt format that is provably narrow.** The exclusion of amount, payer
   and token from the signed payload is enforced by a test, so it cannot regress
   into a marketing claim.
@@ -310,14 +320,29 @@ src/
   app/
     page.tsx                  create a request
     pay/[id]/                 the payer's view — routing, meter, submit
+    bill/                     the AI split bill — scan, assign, one link each
+    bill/[id]/                the organiser's view, "3 of 8 paid"
+    b/[id]/                   short bill link, decrypted with the URL fragment
     dashboard/                shielded balance, your links, receipts
     s/[id]/                   public status page (one bit, self-refreshing)
     verify-receipt/           check a receipt, in the reader's own browser
     api/
       requests/               encode a request into a link
+      nota/scan/              read a receipt photo (claude-haiku-4-5)
+      bills/                  store/read a short bill ciphertext
+      quote/                  fiat → STRK rate, locked into the payload
       resolve/                Starknet ID → address
       status/[id]/            report a payment, read status
   lib/
+    ai/credential.ts          which credential, and whether scanning is on
+    ai/scan.ts                the model call — structured output, image dropped
+    ai/nota.ts                rebuild the answer field by field; who had what
+    bill/allocate.ts          largest-remainder split, shares add back up
+    bill/codec.ts             bill link encode/decode, validated hostilely
+    bill/crypto.ts            AES-GCM-256 for the short link
+    bill/share.ts             a line becomes an ordinary payment request
+    bill/status.ts            "3 of 8 paid", derived and never stored
+    quote.ts                  convert the whole bill once, then divide
     strk20/plan.ts            routing + correlation detection
     strk20/privacy.ts         the Privacy Risk Meter's wording
     strk20/verify.ts          on-chain check of a reported transaction
@@ -328,6 +353,7 @@ src/
     request/history.ts        browser-local list of your links
     store/index.ts            status store (Upstash Redis over REST)
     store/record.ts           what a stored record may contain on the way out
+    store/caller.ts           what the rate limiter may store about a caller
 ```
 
 ## Stack
@@ -343,7 +369,7 @@ git clone https://github.com/bugsm/whisperpay.git
 cd whisperpay
 npm install
 npm run dev      # http://localhost:3000
-npm test         # 89 tests, node:test, no extra dependencies
+npm test         # 247 tests, node:test, no extra dependencies
 npm run build    # production build
 ```
 
@@ -355,6 +381,7 @@ For a real deployment, copy `.env.example` to `.env.local`:
 | Variable | Needed? | Why |
 | --- | --- | --- |
 | `UPSTASH_REDIS_REST_URL` + `_TOKEN` | **yes on serverless** | without it the status store is process memory, and on Vercel the API route and the status page are separate functions with separate memory. `KV_REST_API_*` is read too. |
+| `RATELIMIT_SALT` | recommended wherever Redis is | the scan limiter stores a digest of the caller's address, not the address. IPv4 is 2^32, so an unsalted digest is reversible by enumeration — this secret is what makes it irreversible. Any long random string; unset, the limiter still works and says so in the log. |
 | `NEXT_PUBLIC_RPC_URL` | recommended | the public default rate-limits, and receipt polling is chatty |
 | `NEXT_PUBLIC_APP_URL` | only behind a custom domain | otherwise forwarded headers are used, correct on Vercel out of the box |
 | `ANTHROPIC_API_KEY` | only for receipt scanning | reading a photo into a bill. Set `ANTHROPIC_AUTH_TOKEN` instead where the endpoint wants `Authorization: Bearer` rather than `x-api-key` — most gateways do. Without either, the mode is hidden and `/api/nota/scan` answers 503. |
